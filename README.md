@@ -4,13 +4,27 @@ Tachyon is an advanced, high-performance, and scalable player data management fr
 
 Instead of writing repetitive SQL queries or dealing with race conditions when a player switches servers, Tachyon handles synchronization, caching, snapshots, and auditing automatically behind the scenes.
 
+
+> 📊 **Built for Production:** Real-time monitoring of gRPC latency, profile caching, and network health.
+> ![Tachyon Grafana Dashboard](.github/images/Grafana-Tachyon.png)
+
+
 ## 🚀 Features
 
-* **Component-Based Data System**: Define your player data schemas using Protobuf. Register your components on startup, and Tachyon will handle the serialization and storage.
+* **Component-Based Data System**: Define your player data schemas using Protobuf...
+    <details><summary><i>👀 See MongoDB Schema (Protobuf & Cookies)</i></summary>
+    <img src=".github/images/MongoDB-Players.png" alt="MongoDB Players Collection">
+    </details>
 * **Real-time Server Sync**: Powered by gRPC streams, player data is synchronized instantly across your entire network. When a player switches servers, their data is ready before they even connect.
-* **Snapshots & Backups**: Every data change can be versioned. Tachyon securely stores data snapshots in an S3 bucket, ensuring you never lose player progress.
+* **Snapshots & Backups**: Every data change can be versioned. Tachyon securely stores...
+    <details><summary><i>👀 See MongoDB Snapshots (Binary Data)</i></summary>
+    <img src=".github/images/MongoDB-Snapshots.png" alt="MongoDB Snapshots Collection">
+    </details>
 * **S3 Janitor**: Purges old or redundant snapshots and moves them to your S3 storage to save database space, reduce costs, and optimize resources.
-* **Audit Logs**: A built-in system to track critical player actions. Useful for moderation, economy tracking, and debugging.
+* **Audit Logs**: A built-in system to track critical player actions...
+    <details><summary><i>👀 See MongoDB Audit Logs</i></summary>
+    <img src=".github/images/MongoDB-AuditLogs.png" alt="MongoDB Audit Logs">
+    </details>
 * **Retry Queue & Resiliency**: Network failure? Database timeout? Tachyon queues pending operations and retries them automatically when the connection is restored.
 * **Health & Metrics**: Built-in readiness and liveness checks, alongside a comprehensive metrics scraper for monitoring (e.g., Prometheus/Grafana integration).
 
@@ -147,3 +161,21 @@ graph LR
         Service -- Archives --> S3[AWS S3]
     end
 ```
+
+## 📈 Observability & Grafana Integration
+
+Tachyon is built with transparency in mind. It natively exports deep metrics to Prometheus, allowing you to monitor your entire network's health from a centralized Grafana instance.
+
+<details>
+  <summary><b>🛠️ JVM & Resources Dashboard</b> (Click to expand)</summary>
+  Monitor CPU, RAM, Garbage Collection cycles, and open file descriptors to catch memory leaks before they crash your server.
+  <br><br>
+  <img src=".github/images/Grafana-JVM.png" alt="JVM Dashboard">
+</details>
+
+<details>
+  <summary><b>🎮 Minecraft Performance Dashboard</b> (Click to expand)</summary>
+  Keep an eye on the actual game performance (TPS, MSPT, Chunks, Entities) alongside your data syncing.
+  <br><br>
+  <img src=".github/images/Grafana-Minecraft.png" alt="Minecraft Dashboard">
+</details>
