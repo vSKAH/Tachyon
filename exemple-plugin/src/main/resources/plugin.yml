@@ -1,0 +1,8 @@
+name: Tachyon-Cookies
+version: 1.0
+main: tech.skworks.tachyon.cookies.plugin.TachyonCookies
+depend: [Tachyon-Core]
+commands:
+  cookie:
+    description: Jouer au Cookie Clicker quantique
+    aliases: [cookies]

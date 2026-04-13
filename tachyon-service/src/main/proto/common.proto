@@ -1,0 +1,10 @@
+syntax = "proto3";
+package tachyon.common;
+
+option java_multiple_files = true;
+option java_package = "tech.skworks.tachyon.contracts.common";
+
+message StandardResponse {
+  bool success = 1;
+  string message = 2;
+}

@@ -1,0 +1,23 @@
+syntax = "proto3";
+package tachyon.snapshot;
+
+import "common.proto";
+import "player.proto";
+
+option java_multiple_files = true;
+option java_package = "tech.skworks.tachyon.contracts.snapshot";
+
+service SnapshotService {
+  rpc CreateSnapshot (SnapshotRequest) returns (tachyon.common.StandardResponse);
+  rpc RevertToSnapshot (RevertRequest) returns (tachyon.player.PlayerResponse);
+}
+
+message SnapshotRequest {
+  string uuid = 1;
+  string reason = 2;
+}
+
+message RevertRequest {
+  string uuid = 1;
+  string snapshot_id = 2;
+}

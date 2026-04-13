@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "tech.skworks.tachyon.contracts.system";
+
+package tachyon.system;
+
+service System {
+  rpc Ping (PingRequest) returns (PingResponse) {}
+}
+
+message PingRequest {
+  int64 client_time = 1;
+}
+
+message PingResponse {
+  int64 server_time = 1;
+  string message = 2;
+}

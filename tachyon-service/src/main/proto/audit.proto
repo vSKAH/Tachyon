@@ -1,0 +1,24 @@
+syntax = "proto3";
+package tachyon.audit;
+
+import "common.proto";
+
+option java_multiple_files = true;
+option java_package = "tech.skworks.tachyon.contracts.audit";
+
+service AuditService {
+  rpc LogEvent (LogRequest) returns (tachyon.common.StandardResponse);
+  rpc LogEventBatch (LogBatchRequest) returns (tachyon.common.StandardResponse);
+}
+
+message LogRequest {
+  string uuid = 1;
+  string module = 2;
+  string action = 3;
+  string details = 4;
+  int64 timestamp_ms = 5;
+}
+
+message LogBatchRequest {
+  repeated LogRequest logs = 1;
+}
