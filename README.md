@@ -48,17 +48,33 @@ message CookieComponent {
 Make your main plugin class extend `TachyonPlugin` instead of `JavaPlugin`. Be sure to add `Tachyon-Core` to your `plugin.yml` dependencies!
 
 ```java
-public class TachyonCookies extends TachyonPlugin {
+public class TachyonCookies extends JavaPlugin {
+
+    private TachyonAPI tachyon;
 
     @Override
-    public void onTachyonPluginEnable() {
-        registerComponent(CookieComponent.getDefaultInstance());
+    public void onEnable() {
+        if (!setupTachyon()) {
+            getLogger().severe("TachyonApi missing ! Disabling...");
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+        tachyon.registerComponent(CookieComponent.getDefaultInstance());
         getCommand("cookie").setExecutor(new CookieCommand(this));
-        getLogger().info("Module Cookie Clicker loaded !");
+        getLogger().info("Cookie Clicker loaded !");
     }
 
-    @Override
-    public void onTachyonPluginDisable() {}
+    private boolean setupTachyon() {
+        RegisteredServiceProvider<TachyonAPI> rsp = getServer().getServicesManager().getRegistration(TachyonAPI.class);
+        if (rsp == null) return false;
+
+        tachyon = rsp.getProvider();
+        return tachyon != null;
+    }
+
+    public TachyonAPI getTachyon() {
+        return tachyon;
+    }
 }
 ```
 
@@ -66,16 +82,22 @@ public class TachyonCookies extends TachyonPlugin {
 You can retrieve a player's profile and read/write their components with ease.
 
 ```java
-import tech.skworks.tachyon.plugin.api.profile.TachyonProfile;
+public class CookieCommand implements CommandExecutor {
 
-@Override
+    private final TachyonCookies plugin;
+
+    public CookieCommand(TachyonCookies plugin) {
+        this.plugin = plugin;
+    }
+
+    @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!(sender instanceof Player player)) {
             sender.sendMessage("Only players can execute this command.");
             return true;
         }
 
-        PlayerProfile profile = plugin.getProfileManager().get(player.getUniqueId());
+        TachyonProfile profile = plugin.getTachyon().getProfile(player.getUniqueId());
         if (profile == null) {
             player.sendMessage("§cError: Your profile is not loaded from Tachyon yet.");
             return true;
@@ -99,6 +121,7 @@ import tech.skworks.tachyon.plugin.api.profile.TachyonProfile;
         player.sendMessage("§7Use §f/cookie click §7to gain more cookies.");
         return true;
     }
+}
 ```
 
 ## 🏗️ Architecture overview
