@@ -79,7 +79,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         this.profileManager = new ProfileManager(componentService, componentRegistry, metricsService.getTachyonMetrics());
         this.auditManager = new AuditManager(grpcClient, serverName);
         this.playerProfileService = new PlayerProfileService(metricsService.getTachyonMetrics(), grpcClient);
-        Bukkit.getScheduler().runTaskTimer(this, new HeartBeatsTask(playerProfileService), 100, 100);
+        Bukkit.getScheduler().runTaskTimer(this, new HeartBeatsTask(playerProfileService, config), 100, 180);
 
 
         getServer().getPluginManager().registerEvents(new ConnectionListener(profileManager, playerProfileService, auditManager, componentService, grpcClient), this);

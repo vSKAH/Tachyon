@@ -58,14 +58,14 @@ public class PlayerProfileService extends AbstractGrpcService {
         return beats;
     }
 
-    public void sendHeartBeats(List<PlayerRequest> heartbeats) {
+    public void sendHeartBeats(List<PlayerRequest> heartbeats, boolean log) {
         Thread.startVirtualThread(() -> {
             try (var t = startTimer("PlayerHeartBeatBatch")) {
                 HeartBeatBatchRequest request = HeartBeatBatchRequest.newBuilder().addAllBeat(heartbeats).build();
                 StandardResponse resp = grpcClientManager.getPlayerStub(3).playerHeartBeatBatch(request);
                 if (!resp.getSuccess()) {
                     LOGGER.warn("sendHeartBeats() returned success=false - message {}", resp.getMessage());
-                } else {
+                } else if (log) {
                     LOGGER.info("HeartBeats has been sent !");
                 }
             } catch (Exception e) {

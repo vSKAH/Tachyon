@@ -1,6 +1,7 @@
 package tech.skworks.tachyon.plugin.internal.player.profile;
 
 import tech.skworks.tachyon.contracts.player.PlayerRequest;
+import tech.skworks.tachyon.plugin.internal.config.TachyonConfig;
 
 import java.util.List;
 
@@ -15,16 +16,18 @@ import java.util.List;
 public class HeartBeatsTask implements Runnable{
 
     private final PlayerProfileService playerProfileService;
+    private final boolean logBeats;
 
-    public HeartBeatsTask(PlayerProfileService playerProfileService) {
+    public HeartBeatsTask(PlayerProfileService playerProfileService, TachyonConfig tachyonConfig) {
         this.playerProfileService = playerProfileService;
+        this.logBeats = tachyonConfig.logHeartBeats();
     }
 
     @Override
     public void run() {
         List<PlayerRequest> beats = playerProfileService.buildHeartBeats();
         if (beats.isEmpty()) return;
-        playerProfileService.sendHeartBeats(beats);
+        playerProfileService.sendHeartBeats(beats, logBeats);
         beats.clear();
     }
 }
