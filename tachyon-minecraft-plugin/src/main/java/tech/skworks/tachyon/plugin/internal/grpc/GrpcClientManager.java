@@ -35,7 +35,7 @@ public class GrpcClientManager {
 
     public GrpcClientManager(String host, int port) {
         this.grpcVirtualExecutor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("tachyon-grpc-", 1).factory());
-        LOGGER.info("Initialisation du client gRPC vers " + host + ":" + port + " (Virtual Threads)");
+        LOGGER.info("Initializing gRPC client towards {}:{} (Virtual Threads)", host, port);
         this.channel = ManagedChannelBuilder.forAddress(host, port).useTransportSecurity().executor(grpcVirtualExecutor).keepAliveTime(30, TimeUnit.SECONDS).keepAliveTimeout(5, TimeUnit.SECONDS).keepAliveWithoutCalls(true).maxInboundMessageSize(32 * 1024 * 1024).enableRetry().maxRetryAttempts(3).defaultLoadBalancingPolicy("round_robin").build();
         this.playerStub = PlayerDataServiceGrpc.newBlockingStub(channel);
         this.auditStub = AuditServiceGrpc.newBlockingStub(channel);

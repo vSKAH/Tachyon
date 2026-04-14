@@ -52,14 +52,10 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         config = TachyonConfig.fromFile(getConfig());
         logger = new TachyonLogger(super.getLogger().getName(), "TachyonPlugin");
 
-        String serverName = getConfig().getString("server-name", "lobby-01");
-        String host = getConfig().getString("grpc.host", "localhost");
-        int port = getConfig().getInt("grpc.port", 9000);
-
         this.metricsService = new MetricsService(config.serverName(), this);
-        this.grpcClient = new GrpcClientManager(host, port);
+        this.grpcClient = new GrpcClientManager(config.grpcHost(), config.grpcPort());
 
-        logger.info("Testing connection to Quarkus Backend at " + host + ":" + port + "...");
+        logger.info("Testing connection to Quarkus Backend at {}:{}...", config.grpcHost(), config.grpcPort());
 
         if (!this.grpcClient.pingBackend()) {
             logger.error("=====================================================");
@@ -77,7 +73,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         this.componentRegistry = new ComponentRegistry();
         this.componentService = new ComponentService(grpcClient, getDataFolder(), metricsService.getTachyonMetrics());
         this.profileManager = new ProfileManager(componentService, componentRegistry, metricsService.getTachyonMetrics());
-        this.auditManager = new AuditManager(grpcClient, serverName);
+        this.auditManager = new AuditManager(grpcClient, config.serverName());
         this.playerProfileService = new PlayerProfileService(metricsService.getTachyonMetrics(), grpcClient);
         Bukkit.getScheduler().runTaskTimer(this, new HeartBeatsTask(playerProfileService, config), 100, 180);
 
@@ -86,7 +82,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
         metricsService.startMetricsCollection(config.metricsHost(), config.metricsPort());
         getServer().getServicesManager().register(TachyonAPI.class, this, this, ServicePriority.Highest);
-        logger.info("Tachyon Core [" + serverName + "] initialized.");
+        logger.info("Tachyon Core [{}] initialized.", config.serverName());
     }
 
     @Override

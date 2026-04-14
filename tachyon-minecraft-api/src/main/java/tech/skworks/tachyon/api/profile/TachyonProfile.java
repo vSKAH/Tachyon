@@ -3,6 +3,7 @@ package tech.skworks.tachyon.api.profile;
 import tech.skworks.tachyon.libs.protobuf.Message;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -12,7 +13,6 @@ import java.util.function.Consumer;
  * Class TachyonProfile
  *
  * <p> Component lifecycle: </p>
- * <p> - initComponent()   : called at load time — sets value, does NOT mark dirty. </p>
  * <p> - setComponent()    : called by plugins — sets value AND marks dirty.</p>
  * <p> - saveComponent()   : marks dirty + immediately enqueues a gRPC save.</p>
  * <p> - saveProfile()     : flushes only dirty components to the backend.</p>
@@ -26,15 +26,13 @@ import java.util.function.Consumer;
  */
 public interface TachyonProfile {
 
-    public <T extends Message> void initComponent(T component);
-
     public <T extends Message> void setComponent(T component);
 
     public <T extends Message, B extends Message.Builder> void updateComponent(Class<T> clazz, Consumer<B> modifier);
 
     public <T extends Message> T getComponent(Class<T> clazz, @Nonnull T defaultValue);
 
-    public @Nonnull <T extends Message> T getComponent(Class<T> clazz);
+    public @Nullable <T extends Message> T getComponent(Class<T> clazz);
 
     public <T extends Message> CompletableFuture<Void> saveComponent(T component);
 

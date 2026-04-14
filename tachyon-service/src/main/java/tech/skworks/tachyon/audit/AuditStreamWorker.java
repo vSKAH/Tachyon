@@ -56,7 +56,7 @@ class AuditStreamWorker {
     @PostConstruct
     void init() {
         this.auditCollection = mongo.getDatabase(dbName).getCollection(config.collection());
-        log.infof("[PlayerStreamWorker] Initialized with consumer ID '%s' on stream '%s'.", consumerId, config.streamKey());
+        log.infof("[AuditStreamWorker] Initialized with consumer ID '%s' on stream '%s'.", consumerId, config.streamKey());
     }
 
     @Scheduled(every = "2s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
