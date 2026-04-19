@@ -75,8 +75,8 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
         this.log.debug("SnapshotGrpcService collections initialized.");
     }
 
-    @Override
-    public Uni<Empty> createSnapshot(SnapshotRequest req) {
+   @Override
+    public Uni<Empty> takeDatabaseSnapshot(TakeDatabaseSnapshotRequest req) {
         Map<String, byte[]> payload = new HashMap<>();
         payload.put("granularity", "FULL".getBytes(StandardCharsets.UTF_8));
         payload.put("global_payload", req.toByteArray());
@@ -85,7 +85,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
     }
 
     @Override
-    public Uni<Empty> createSpecificSnapshot(SpecificSnapshotRequest req) {
+    public Uni<Empty> takeComponentSnapshot(TakeComponentSnapshotRequest req) {
         if (req.getRawData().isEmpty()) {
             return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("Raw data is required for specific snapshots.").asRuntimeException());
         }
@@ -107,24 +107,24 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
     }
 
     @Override
-    public Uni<SnapshotListResponse> listSnapshots(SnapshotListRequest req) {
-        if (req.getUuid().isBlank()) {
+    public Uni<ListSnapshotsResponse> listSnapshots(ListSnapshotsRequest req) {
+        if (req.getPlayerId().isBlank()) {
             return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("UUID is required").asRuntimeException());
         }
 
-        return snapshotCollection.find(Filters.eq("uuid", req.getUuid()), new FindOptions()
+        return snapshotCollection.find(Filters.eq("uuid", req.getPlayerId()), new FindOptions()
                         .sort(Sorts.descending("timestamp"))
                         .projection(Projections.exclude("data", "uuid")))
                 .collect().asList().onFailure().transform(e -> {
-                    log.errorf(e, "Failed to fetch snapshots for player %s", req.getUuid());
+                    log.errorf(e, "Failed to fetch snapshots for player %s", req.getPlayerId());
                     return Status.INTERNAL.withDescription("Database error occurred").withCause(e).asRuntimeException();
                 }).map(docs -> {
-                    SnapshotListResponse.Builder res = SnapshotListResponse.newBuilder().setUuid(req.getUuid());
+                    ListSnapshotsResponse.Builder res = ListSnapshotsResponse.newBuilder().setPlayerId(req.getPlayerId());
 
                     for (Document d : docs) {
                         try {
                             String typeStr = d.getString("type");
-                            SnapshotTriggerType type = (typeStr != null) ? SnapshotTriggerType.valueOf(typeStr) : SnapshotTriggerType.OTHER;
+                            SnapshotTriggerType type = (typeStr != null) ? SnapshotTriggerType.valueOf(typeStr) : SnapshotTriggerType.SNAPSHOT_TRIGGER_UNSPECIFIED;
 
                             res.addSnapshots(SnapshotInfo.newBuilder()
                                     .setSnapshotId(d.getObjectId("_id").toHexString())
@@ -145,7 +145,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
 
 
     @Override
-    public Uni<DecodeSnapshotResponse> viewSnapshot(ViewSnapshotRequest req) {
+    public Uni<DecodeSnapshotResponse> decodeSnapshot(DecodeSnapshotRequest req) {
         final String snapshotId = req.getSnapshotId();
 
         return parseObjectId(snapshotId)
@@ -278,7 +278,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
     }
 
     @Override
-    public Uni<PlayerResponse> revertToSnapshot(RevertRequest request) {
-        return super.revertToSnapshot(request); //TODO
+    public Uni<PlayerResponse> revertToSnapshot(RevertToSnapshotRequest request) {
+        return super.revertToSnapshot(request);
     }
 }

@@ -67,8 +67,8 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
 
     public CompletableFuture<Void> takeDatabaseSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason, @NotNull SnapshotTriggerType triggerType) {
         return asyncRun(() -> {
-            SnapshotRequest request = SnapshotRequest.newBuilder().setUuid(playerUniqueId).setReason(reason).setTriggerType(triggerType).build();
-            grpcClientManager.getSnapshotStub(3).createSnapshot(request);
+            TakeDatabaseSnapshotRequest request = TakeDatabaseSnapshotRequest.newBuilder().setPlayerId(playerUniqueId).setReason(reason).setTriggerType(triggerType).build();
+            grpcClientManager.getSnapshotStub(3).takeDatabaseSnapshot(request);
         });
     }
 
@@ -76,26 +76,26 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
     public <T extends Message> CompletableFuture<Void> takeComponentSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason,
                                                                              @NotNull final SnapshotTriggerType triggerType, @NotNull final T component) {
         return asyncRun(() -> {
-            SpecificSnapshotRequest request = SpecificSnapshotRequest.newBuilder().setUuid(playerUniqueId).setReason(reason)
+            TakeComponentSnapshotRequest request = TakeComponentSnapshotRequest.newBuilder().setPlayerId(playerUniqueId).setReason(reason)
                     .setTriggerType(triggerType).setTargetComponent(component.getDescriptorForType().getFullName())
                     .setRawData(ByteString.copyFrom(Zstd.compress(component.toByteArray()))).build();
-            grpcClientManager.getSnapshotStub(3).createSpecificSnapshot(request);
+            grpcClientManager.getSnapshotStub(3).takeComponentSnapshot(request);
         });
 
     }
 
     @Override
-    public CompletableFuture<SnapshotListResponse> getSnapshots(@NotNull final String playerUniqueId) {
+    public CompletableFuture<ListSnapshotsResponse> getSnapshots(@NotNull final String playerUniqueId) {
         return asyncCall(() -> {
-            SnapshotListRequest request = SnapshotListRequest.newBuilder().setUuid(playerUniqueId).build();
+            ListSnapshotsRequest request = ListSnapshotsRequest.newBuilder().setPlayerId(playerUniqueId).build();
             return grpcClientManager.getSnapshotStub(3).listSnapshots(request);
         });
     }
 
     public CompletableFuture<DecodeSnapshotResponse> decodeSnapshot(@NotNull final String snapshotId) {
         return asyncCall(() -> {
-            ViewSnapshotRequest request = ViewSnapshotRequest.newBuilder().setSnapshotId(snapshotId).build();
-            return grpcClientManager.getSnapshotStub(3).viewSnapshot(request);
+            DecodeSnapshotRequest request = DecodeSnapshotRequest.newBuilder().setSnapshotId(snapshotId).build();
+            return grpcClientManager.getSnapshotStub(3).decodeSnapshot(request);
         });
     }
 

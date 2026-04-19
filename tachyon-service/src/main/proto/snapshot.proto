@@ -10,20 +10,48 @@ option java_multiple_files = true;
 option java_package = "tech.skworks.tachyon.service.contracts.snapshot";
 
 service SnapshotService {
-  rpc CreateSnapshot (SnapshotRequest) returns (google.protobuf.Empty);
-  rpc CreateSpecificSnapshot (SpecificSnapshotRequest) returns (google.protobuf.Empty);
-  rpc RevertToSnapshot (RevertRequest) returns (tech.skworks.tachyon.service.contracts.player.PlayerResponse);
-  rpc ListSnapshots (SnapshotListRequest) returns (SnapshotListResponse);
-  rpc ViewSnapshot (ViewSnapshotRequest) returns (DecodeSnapshotResponse);
+  rpc TakeDatabaseSnapshot (TakeDatabaseSnapshotRequest) returns (google.protobuf.Empty);
+  rpc TakeComponentSnapshot (TakeComponentSnapshotRequest) returns (google.protobuf.Empty);
+  rpc RevertToSnapshot (RevertToSnapshotRequest) returns (tech.skworks.tachyon.service.contracts.player.PlayerResponse);
+  rpc ListSnapshots (ListSnapshotsRequest) returns (ListSnapshotsResponse);
+  rpc DecodeSnapshot (DecodeSnapshotRequest) returns (DecodeSnapshotResponse);
 }
 
-message SnapshotListRequest {
-  string uuid = 1;
+message TakeDatabaseSnapshotRequest {
+  SnapshotTriggerType trigger_type = 1;
+  string player_id = 2;
+  string reason = 3;
 }
 
-message SnapshotListResponse {
-  string uuid = 1;
+message TakeComponentSnapshotRequest {
+  SnapshotTriggerType trigger_type = 1;
+  string player_id = 2;
+  string reason = 3;
+  string target_component = 4;
+  bytes raw_data = 5;
+}
+
+message RevertToSnapshotRequest {
+  string player_id = 1;
+  string snapshot_id = 2;
+}
+
+message ListSnapshotsRequest {
+  string player_id = 1;
+}
+
+message ListSnapshotsResponse {
+  string player_id = 1;
   repeated SnapshotInfo snapshots = 2;
+}
+
+message DecodeSnapshotRequest {
+  string snapshot_id = 1;
+}
+
+message DecodeSnapshotResponse {
+  string snapshot_id = 1;
+  map<string, google.protobuf.Any> components = 2;
 }
 
 message SnapshotInfo {
@@ -35,37 +63,9 @@ message SnapshotInfo {
   string granularity = 6;
 }
 
-message ViewSnapshotRequest {
-  string snapshot_id = 1;
-}
-
-message DecodeSnapshotResponse {
-  string snapshot_id = 1;
-  map<string, google.protobuf.Any> components = 2;
-}
-
 enum SnapshotTriggerType {
-  SPIGOT_TASK = 0;
-  MANUAL = 1;
-  OTHER = 2;
+  SNAPSHOT_TRIGGER_UNSPECIFIED = 0;
+  SNAPSHOT_TRIGGER_SPIGOT_TASK = 1;
+  SNAPSHOT_TRIGGER_MANUAL = 2;
+  SNAPSHOT_TRIGGER_OTHER = 3;
 }
-
-message SpecificSnapshotRequest {
-  SnapshotTriggerType trigger_type = 1;
-  string uuid = 2;
-  string reason = 3;
-  string target_component = 4;
-  bytes raw_data = 5;
-}
-
-message SnapshotRequest {
-  SnapshotTriggerType trigger_type = 1;
-  string uuid = 2;
-  string reason = 3;
-}
-
-message RevertRequest {
-  string uuid = 1;
-  string snapshot_id = 2;
-}
-

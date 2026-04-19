@@ -148,7 +148,7 @@ public class SnapshotCommand implements TabExecutor {
     private void takeFullSnapshot(CommandSender sender, String targetName, String targetUniqueId, String reason) {
         sender.sendMessage("§7Initiating full snapshot for " + targetName + "...");
 
-        snapshotService.takeDatabaseSnapshot(targetUniqueId, reason, SnapshotTriggerType.MANUAL)
+        snapshotService.takeDatabaseSnapshot(targetUniqueId, reason, SnapshotTriggerType.SNAPSHOT_TRIGGER_MANUAL)
                 .whenComplete((v, ex) -> {
                     if (ex != null) {
                         sender.sendMessage("§cFailed to take full snapshot for " + targetName + ".");
@@ -171,7 +171,7 @@ public class SnapshotCommand implements TabExecutor {
 
         sender.sendMessage("§7Initiating component snapshot (" + componentName + ") for " + targetName + "...");
 
-        snapshotService.takeComponentSnapshot(targetUniqueId.toString(), reason, SnapshotTriggerType.MANUAL, component).whenComplete((v, ex) -> {
+        snapshotService.takeComponentSnapshot(targetUniqueId.toString(), reason, SnapshotTriggerType.SNAPSHOT_TRIGGER_MANUAL, component).whenComplete((v, ex) -> {
             if (ex != null) {
                 sender.sendMessage("§cFailed to take specific snapshot for " + targetName + ".");
                 return;

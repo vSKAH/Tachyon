@@ -18,8 +18,8 @@ import org.bson.Document;
 import org.bson.types.Binary;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.service.contracts.snapshot.SnapshotRequest;
-import tech.skworks.tachyon.service.contracts.snapshot.SpecificSnapshotRequest;
+import tech.skworks.tachyon.service.contracts.snapshot.TakeComponentSnapshotRequest;
+import tech.skworks.tachyon.service.contracts.snapshot.TakeDatabaseSnapshotRequest;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
 import java.nio.charset.StandardCharsets;
@@ -142,11 +142,11 @@ public class SnapshotStreamWorker {
 
             try {
                 if (specificPayloads != null) {
-                    SpecificSnapshotRequest request = SpecificSnapshotRequest.parseFrom(specificPayloads);
-                    return handleSpecificSnapshot(granularity, source, timestamp, request).replaceWith(msg.id());
+                    TakeComponentSnapshotRequest request = TakeComponentSnapshotRequest.parseFrom(specificPayloads);
+                    return handleComponentSnapshot(granularity, source, timestamp, request).replaceWith(msg.id());
                 } else if (globalPayload != null) {
-                    SnapshotRequest request = SnapshotRequest.parseFrom(globalPayload);
-                    return handleFullSnapshot(granularity, source, timestamp, request).replaceWith(msg.id());
+                    TakeDatabaseSnapshotRequest request = TakeDatabaseSnapshotRequest.parseFrom(globalPayload);
+                    return handleDatabaseSnapshot(granularity, source, timestamp, request).replaceWith(msg.id());
                 }
 
                 log.warnf("[SnapshotStreamWorker] Message %s has no payloads. Poison pill detected. Discarding.", msg.id());
@@ -159,8 +159,8 @@ public class SnapshotStreamWorker {
         });
     }
 
-    private Uni<Void> handleSpecificSnapshot(final String granularity, final String source, final long timestamp, final SpecificSnapshotRequest request) {
-        String uuid = request.getUuid();
+    private Uni<Void> handleComponentSnapshot(final String granularity, final String source, final long timestamp, final TakeComponentSnapshotRequest request) {
+        String uuid = request.getPlayerId();
         byte[] data = request.getRawData().toByteArray();
         String targetComponent = request.getTargetComponent();
 
@@ -179,8 +179,8 @@ public class SnapshotStreamWorker {
                 .replaceWithVoid();
     }
 
-    private Uni<Void> handleFullSnapshot(final String granularity, final String source, final long timestamp, final SnapshotRequest request) {
-        String uuid = request.getUuid();
+    private Uni<Void> handleDatabaseSnapshot(final String granularity, final String source, final long timestamp, final TakeDatabaseSnapshotRequest request) {
+        String uuid = request.getPlayerId();
 
         return playersCollection.find(Filters.eq("uuid", uuid)).collect().first()
                 .chain(playerDoc -> {

@@ -2,7 +2,7 @@ package tech.skworks.tachyon.api.services;
 
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.service.contracts.snapshot.DecodeSnapshotResponse;
-import tech.skworks.tachyon.service.contracts.snapshot.SnapshotListResponse;
+import tech.skworks.tachyon.service.contracts.snapshot.ListSnapshotsResponse;
 import tech.skworks.tachyon.service.contracts.snapshot.SnapshotTriggerType;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 
@@ -71,7 +71,7 @@ public interface SnapshotService {
      * @param playerUniqueId The UUID of the player whose snapshot history is being requested.
      * @return A CompletableFuture containing the response with the list of snapshot metadata.
      */
-    CompletableFuture<SnapshotListResponse> getSnapshots(@NotNull final String playerUniqueId);
+    CompletableFuture<ListSnapshotsResponse> getSnapshots(@NotNull final String playerUniqueId);
 
 
     /**
