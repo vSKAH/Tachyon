@@ -1,0 +1,9 @@
+syntax = "proto3";
+package tech.skworks.tachyon.exampleplugin.components;
+
+option java_multiple_files = true;
+option java_package = "tech.skworks.tachyon.exampleplugin.components";
+
+message CookieComponent {
+  int64 cookies = 1;
+}

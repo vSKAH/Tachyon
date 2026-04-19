@@ -1,13 +1,13 @@
-package tech.skworks.tachyon.exempleplugin;
+package tech.skworks.tachyon.exampleplugin;
 
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
-import tech.skworks.cookies.components.CookieComponent;
 import tech.skworks.tachyon.api.TachyonAPI;
 import tech.skworks.tachyon.api.handler.ComponentPreviewHandler;
+import tech.skworks.tachyon.exampleplugin.components.CookieComponent;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 
 /**

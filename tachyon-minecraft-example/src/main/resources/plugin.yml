@@ -1,6 +1,6 @@
 name: Tachyon-Cookies
 version: 1.0
-main: tech.skworks.tachyon.exempleplugin.TachyonCookies
+main: tech.skworks.tachyon.exampleplugin.TachyonCookies
 depend: [Tachyon-Core]
 commands:
   cookie:

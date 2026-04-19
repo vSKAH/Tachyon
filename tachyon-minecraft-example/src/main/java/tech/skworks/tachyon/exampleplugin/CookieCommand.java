@@ -1,13 +1,13 @@
-package tech.skworks.tachyon.exempleplugin;
+package tech.skworks.tachyon.exampleplugin;
 
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import tech.skworks.cookies.components.CookieComponent;
 import tech.skworks.tachyon.api.TachyonAPI;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
+import tech.skworks.tachyon.exampleplugin.components.CookieComponent;
 
 import java.util.UUID;
 
