@@ -172,7 +172,8 @@ public class SnapshotStreamWorker {
                 .append("trigger_type", request.getTriggerType())
                 .append("reason", request.getReason())
                 .append("target_component", targetComponent)
-                .append("data", new Binary(data));
+                .append("data", new Binary(data))
+                .append("locked", false);
 
         return snapshotsCollection.insertOne(doc)
                 .invoke(() -> log.infof("[SnapshotStreamWorker] Snapshot inserted for %s (SPECIFIC, size: %d bytes).", uuid, data.length))
@@ -202,7 +203,8 @@ public class SnapshotStreamWorker {
                                         .append("uuid", uuid)
                                         .append("trigger_type", request.getTriggerType())
                                         .append("reason", request.getReason())
-                                        .append("data", new Binary(compressedData));
+                                        .append("data", new Binary(compressedData))
+                                        .append("locked", false);
 
                                 return snapshotsCollection.insertOne(doc)
                                         .invoke(() -> log.infof("[SnapshotStreamWorker] Snapshot inserted for %s (FULL, size: %d bytes).", uuid, compressedData.length))

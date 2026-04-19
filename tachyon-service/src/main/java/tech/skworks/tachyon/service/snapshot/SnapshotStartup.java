@@ -63,7 +63,7 @@ public class SnapshotStartup {
             database.createCollection(snapshotConfig.collection());
             MongoCollection<Document> snapshotCollection = database.getCollection(snapshotConfig.collection());
             snapshotCollection.createIndex(Indexes.compoundIndex(Indexes.ascending("uuid"), Indexes.descending("timestamp")));
-            IndexOptions options = new IndexOptions().expireAfter(1L, TimeUnit.DAYS).partialFilterExpression(Filters.ne("locked", true));
+            IndexOptions options = new IndexOptions().expireAfter(1L, TimeUnit.DAYS).partialFilterExpression(Filters.eq("locked", false));
             snapshotCollection.createIndex(Indexes.ascending("archived_at"), options);
         }
         log.info("MongoDB indexes for Snapshot module verified/created.");
