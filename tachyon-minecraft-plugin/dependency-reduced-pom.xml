@@ -22,6 +22,16 @@
               <transformers>
                 <transformer />
               </transformers>
+              <relocations>
+                <relocation>
+                  <pattern>studio.mevera</pattern>
+                  <shadedPattern>tech.skworks.tachyon.plugin.shaded.mevera</shadedPattern>
+                </relocation>
+                <relocation>
+                  <pattern>io.prometheus</pattern>
+                  <shadedPattern>tech.skworks.tachyon.plugin.shaded.prometheus</shadedPattern>
+                </relocation>
+              </relocations>
             </configuration>
           </execution>
         </executions>

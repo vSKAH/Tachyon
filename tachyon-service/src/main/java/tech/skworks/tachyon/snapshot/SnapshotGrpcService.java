@@ -1,14 +1,26 @@
 package tech.skworks.tachyon.snapshot;
 
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoCollection;
+import com.github.luben.zstd.Zstd;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.protobuf.*;
+import com.google.protobuf.util.JsonFormat;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.Sorts;
 import io.grpc.Status;
-import io.grpc.stub.StreamObserver;
 import io.quarkus.grpc.GrpcService;
-import io.quarkus.redis.datasource.RedisDataSource;
-import io.quarkus.redis.datasource.value.ValueCommands;
-import io.smallrye.common.annotation.Blocking;
+import io.quarkus.mongodb.FindOptions;
+import io.quarkus.mongodb.reactive.ReactiveMongoClient;
+import io.quarkus.mongodb.reactive.ReactiveMongoCollection;
+import io.quarkus.redis.datasource.ReactiveRedisDataSource;
+import io.quarkus.redis.datasource.stream.ReactiveStreamCommands;
+import io.quarkus.redis.datasource.stream.XAddArgs;
+import io.smallrye.common.annotation.NonBlocking;
+import io.smallrye.mutiny.Uni;
+import io.smallrye.mutiny.infrastructure.Infrastructure;
+import jakarta.annotation.Nullable;
 import jakarta.annotation.PostConstruct;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -16,13 +28,13 @@ import org.bson.types.Binary;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.contracts.common.StandardResponse;
 import tech.skworks.tachyon.contracts.player.PlayerResponse;
-import tech.skworks.tachyon.contracts.snapshot.RevertRequest;
-import tech.skworks.tachyon.contracts.snapshot.SnapshotRequest;
-import tech.skworks.tachyon.contracts.snapshot.SnapshotServiceGrpc;
+import tech.skworks.tachyon.contracts.snapshot.*;
+import tech.skworks.tachyon.infra.DynamicProtobufRegistry;
 
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Project Tachyon
@@ -33,96 +45,241 @@ import java.nio.charset.StandardCharsets;
  * @since 1.0.0-SNAPSHOT
  */
 @GrpcService
-@Blocking
-public class SnapshotGrpcService extends SnapshotServiceGrpc.SnapshotServiceImplBase {
+@NonBlocking
+public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServiceImplBase {
 
     @Inject
     Logger log;
     @Inject
-    MongoClient mongo;
+    SnapshotConfig snapshotConfig;
+
     @Inject
-    SnapshotConfig config;
+    ReactiveMongoClient mongoClient;
+    @ConfigProperty(name = "quarkus.mongodb.database")
+    String databaseName;
 
-    @ConfigProperty(name = "tachyon.database.name")
-    String dbName;
+    @Inject
+    DynamicProtobufRegistry protobufRegistry;
 
-    private final ValueCommands<String, byte[]> redisBytes;
+    private final ReactiveStreamCommands<String, String, byte[]> redisStream;
+    private static final XAddArgs STREAM_ARGS = new XAddArgs().maxlen(20000L).nearlyExactTrimming();
 
-    private MongoCollection<Document> playersCollection;
-    private MongoCollection<Document> snapshotCollection;
+    private ReactiveMongoCollection<Document> snapshotCollection;
 
-    public SnapshotGrpcService(RedisDataSource redisDS) {
-        this.redisBytes = redisDS.value(byte[].class);
+    public SnapshotGrpcService(ReactiveRedisDataSource redisDS) {
+        this.redisStream = redisDS.stream(byte[].class);
     }
 
     @PostConstruct
     void init() {
-        this.playersCollection = mongo.getDatabase(dbName).getCollection(config.playersCollection());
-        this.snapshotCollection = mongo.getDatabase(dbName).getCollection(config.snapshotsCollection());
-        log.debug("SnapshotGrpcService collections initialized.");
+        this.snapshotCollection = mongoClient.getDatabase(databaseName).getCollection(snapshotConfig.collection());
+        this.log.debug("SnapshotGrpcService collections initialized.");
     }
 
     @Override
-    public void createSnapshot(SnapshotRequest req, StreamObserver<StandardResponse> obs) {
-        String uuid = req.getUuid();
-        String reason = req.getReason().isBlank() ? "MANUAL" : req.getReason();
+    public Uni<Empty> createSnapshot(SnapshotRequest req) {
+        Map<String, byte[]> payload = new HashMap<>();
+        payload.put("granularity", "FULL".getBytes(StandardCharsets.UTF_8));
+        payload.put("global_payload", req.toByteArray());
+
+        return pushToStream(payload);
+    }
+
+    @Override
+    public Uni<Empty> createSpecificSnapshot(SpecificSnapshotRequest req) {
+        if (req.getRawData().isEmpty()) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("Raw data is required for specific snapshots.").asRuntimeException());
+        }
+
+        Map<String, byte[]> payload = new HashMap<>();
+        payload.put("granularity", "SPECIFIC_COMPONENT".getBytes(StandardCharsets.UTF_8));
+        payload.put("specific_payload", req.toByteArray());
+        return pushToStream(payload);
+    }
+
+    private Uni<Empty> pushToStream(Map<String, byte[]> payload) {
+        payload.put("source", "EXTERNAL".getBytes(StandardCharsets.UTF_8));
+        payload.put("timestamp", String.valueOf(System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8));
+
+        return redisStream.xadd(snapshotConfig.streamKey(), STREAM_ARGS, payload)
+                .replaceWith(Empty.getDefaultInstance())
+                .onFailure().invoke(e -> log.error("Redis Stream Error", e))
+                .onFailure().transform(e -> Status.UNAVAILABLE.withDescription("The snapshot buffer (Redis) is currently unavailable.").withCause(e).asRuntimeException());
+    }
+
+    @Override
+    public Uni<SnapshotListResponse> listSnapshots(SnapshotListRequest req) {
+        if (req.getUuid().isBlank()) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("UUID is required").asRuntimeException());
+        }
+
+        return snapshotCollection.find(Filters.eq("uuid", req.getUuid()), new FindOptions()
+                        .sort(Sorts.descending("timestamp"))
+                        .projection(Projections.exclude("data", "uuid")))
+                .collect().asList().onFailure().transform(e -> {
+                    log.errorf(e, "Failed to fetch snapshots for player %s", req.getUuid());
+                    return Status.INTERNAL.withDescription("Database error occurred").withCause(e).asRuntimeException();
+                }).map(docs -> {
+                    SnapshotListResponse.Builder res = SnapshotListResponse.newBuilder().setUuid(req.getUuid());
+
+                    for (Document d : docs) {
+                        try {
+                            String typeStr = d.getString("type");
+                            SnapshotTriggerType type = (typeStr != null) ? SnapshotTriggerType.valueOf(typeStr) : SnapshotTriggerType.OTHER;
+
+                            res.addSnapshots(SnapshotInfo.newBuilder()
+                                    .setSnapshotId(d.getObjectId("_id").toHexString())
+                                    .setTriggerType(type)
+                                    .setTimestamp(d.getLong("timestamp") != null ? d.getLong("timestamp") : 0L)
+                                    .setReason(d.getString("reason") != null ? d.getString("reason") : "N/A")
+                                    .setSource(d.getString("source") != null ? d.getString("source") : "UNKNOWN")
+                                    .setGranularity(d.getString("granularity") != null ? d.getString("granularity") : "FULL")
+                                    .build());
+                        } catch (Exception e) {
+                            log.warnf("Skipping corrupted snapshot document %s: %s", d.getObjectId("_id"), e.getMessage());
+                        }
+                    }
+
+                    return res.build();
+                });
+    }
+
+
+    @Override
+    public Uni<DecodeSnapshotResponse> viewSnapshot(ViewSnapshotRequest req) {
+        final String snapshotId = req.getSnapshotId();
+
+        return parseObjectId(snapshotId)
+                .chain(objectId -> fetchSnapshotDocument(objectId, snapshotId))
+                .chain(doc -> extractAndDecompressPayload(doc)
+                        .chain(decompressedBytes -> buildResponse(doc, snapshotId, decompressedBytes)))
+                .onFailure().invoke(e -> log.errorf("Failed to process ViewSnapshot request for ID: %s. Reason: %s", snapshotId, e.getMessage()));
+    }
+
+    private Uni<ObjectId> parseObjectId(String snapshotId) {
+        try {
+            return Uni.createFrom().item(new ObjectId(snapshotId));
+        } catch (IllegalArgumentException e) {
+            log.errorf(e, "Invalid format for snapshot ID '%s'", snapshotId);
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withCause(e).withDescription("The provided Snapshot ID has an invalid format.").asRuntimeException());
+        }
+    }
+
+    private Uni<Document> fetchSnapshotDocument(ObjectId objectId, String snapshotId) {
+        return snapshotCollection.find(Filters.eq("_id", objectId)).collect().first()
+                .onItem().ifNull().failWith(() -> Status.NOT_FOUND.withDescription("This snapshot does not exist in the database.").asRuntimeException())
+                .onFailure(e -> !(e instanceof io.grpc.StatusRuntimeException))
+                .transform(e -> {
+                    log.errorf(e, "Database error while fetching snapshot %s", snapshotId);
+                    return Status.INTERNAL.withDescription("Database error occurred").withCause(e).asRuntimeException();
+                });
+    }
+
+    private Uni<byte[]> extractAndDecompressPayload(Document doc) {
+        final Binary binary = doc.get("data", Binary.class);
+        if (binary == null) {
+            return Uni.createFrom().failure(Status.DATA_LOSS.withDescription("Snapshot document is missing the 'data' field.").asRuntimeException());
+        }
+        return Uni.createFrom().item(() -> decompressPayload(binary.getData())).runSubscriptionOn(Infrastructure.getDefaultWorkerPool());
+    }
+
+    private Uni<DecodeSnapshotResponse> buildResponse(Document doc, String snapshotId, byte[] decompressedBytes) {
+        final String granularity = doc.getString("granularity");
+
+        if (granularity == null) {
+            return Uni.createFrom().failure(Status.DATA_LOSS.withDescription("Snapshot document is missing the 'granularity' field.").asRuntimeException());
+        }
 
         try {
-            Document playerDoc = playersCollection.find(Filters.eq("uuid", uuid)).first();
+            if (granularity.equalsIgnoreCase("FULL")) {
+                return processFullSnapshot(snapshotId, decompressedBytes);
+            } else if (granularity.equalsIgnoreCase("SPECIFIC_COMPONENT")) {
+                return processSpecificSnapshot(doc, snapshotId, decompressedBytes);
+            } else {
+                return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("Unknown granularity: " + granularity).asRuntimeException());
+            }
+        } catch (Exception e) {
+            log.errorf(e, "Data parsing corrupted for snapshot (ID: %s, Granularity: %s)", snapshotId, granularity);
+            return Uni.createFrom().failure(Status.DATA_LOSS.withDescription("Snapshot data is corrupted or cannot be parsed.").asRuntimeException());
+        }
+    }
 
-            if (playerDoc == null) {
-                log.infof("createSnapshot: no document found for uuid=%s, nothing to snapshot.", uuid);
-                obs.onNext(StandardResponse.newBuilder().setSuccess(true).setMessage("Player not found, no snapshot created.").build());
-                obs.onCompleted();
-                return;
+    private Uni<DecodeSnapshotResponse> processSpecificSnapshot(Document doc, String snapshotId, byte[] decompressedBytes) {
+        final String targetComponent = doc.getString("target_component");
+        if (targetComponent == null) {
+            return Uni.createFrom().failure(Status.DATA_LOSS.withDescription("Specific Snapshot is missing the 'target_component' field in database.").asRuntimeException());
+        }
+        final Any componentAny = Any.newBuilder().setTypeUrl("type.googleapis.com/" + targetComponent).setValue(ByteString.copyFrom(decompressedBytes)).build();
+        final DecodeSnapshotResponse response = DecodeSnapshotResponse.newBuilder().setSnapshotId(snapshotId).putComponents(targetComponent, componentAny).build();
+        return Uni.createFrom().item(response);
+    }
+
+
+    private Uni<DecodeSnapshotResponse> processFullSnapshot(String snapshotId, byte[] decompressedBytes) {
+        final DecodeSnapshotResponse.Builder response = DecodeSnapshotResponse.newBuilder().setSnapshotId(snapshotId);
+
+        final String jsonPayload = new String(decompressedBytes, StandardCharsets.UTF_8);
+        final JsonObject document = JsonParser.parseString(jsonPayload).getAsJsonObject();
+
+        if (!document.has("components")) {
+            return Uni.createFrom().failure(Status.DATA_LOSS.withDescription("Unable to find 'components' section inside the FULL snapshot: " + snapshotId).asRuntimeException());
+        }
+
+        JsonObject componentsJson = document.getAsJsonObject("components");
+        for (Map.Entry<String, JsonElement> entry : componentsJson.entrySet()) {
+            JsonObject componentData = entry.getValue().getAsJsonObject();
+
+            if (!componentData.has("@type")) {
+                log.warnf("Missing '@type' in 'components.%s' of snapshot: %s", entry.getKey(), snapshotId);
+                continue;
             }
 
-            Document docToStore = Document.parse(playerDoc.toJson());
-            docToStore.remove("_id");
+            final String typeName = componentData.get("@type").getAsString();
+            final Any component = buildComponent(snapshotId, typeName, componentData);
+            response.putComponents(typeName, component);
+        }
 
-            byte[] data = docToStore.toJson().getBytes(StandardCharsets.UTF_8);
+        return Uni.createFrom().item(response.build());
+    }
 
-            Document snapshot = new Document("uuid", uuid).append("timestamp", System.currentTimeMillis()).append("reason", reason).append("data", new Binary(data));
+    private Any buildComponent(final String snapshotId, final String typeName, final JsonObject datas) {
+        Descriptors.Descriptor descriptor = protobufRegistry.findDescriptor(typeName);
+        if (descriptor == null) {
+            throw Status.DATA_LOSS.withDescription("Descriptor not found for type " + typeName + " (Snapshot ID: " + snapshotId + ")").asRuntimeException();
+        }
+        final DynamicMessage.Builder dynamicBuilder = DynamicMessage.newBuilder(descriptor);
+        try {
+            JsonFormat.parser().ignoringUnknownFields().merge(datas.toString(), dynamicBuilder);
+            return Any.pack(dynamicBuilder.build());
+        } catch (InvalidProtocolBufferException e) {
+            throw Status.INTERNAL.withDescription("Failed to build component for type " + typeName + " (Snapshot ID: " + snapshotId + ")").asRuntimeException();
+        }
+    }
 
-            snapshotCollection.insertOne(snapshot);
+    private byte[] decompressPayload(byte[] data) {
+        try {
+            long expectedSize = Zstd.getFrameContentSize(data, 0, data.length, false);
 
-            log.infof("Snapshot created for player %s (reason: %s)", uuid, reason);
-            obs.onNext(StandardResponse.newBuilder().setSuccess(true).build());
-            obs.onCompleted();
+            if (expectedSize < 0) {
+                throw Status.INTERNAL.withDescription("Zstd metadata error: Invalid frame header.").asRuntimeException();
+            }
+            if (expectedSize == 0) {
+                throw Status.DATA_LOSS.withDescription("Zstd metadata error: Original size is unknown.").asRuntimeException();
+            }
+
+            return Zstd.decompress(data, (int) expectedSize);
 
         } catch (Exception e) {
-            log.errorf(e, "Failed to create snapshot for %s", uuid);
-            obs.onError(Status.INTERNAL.withDescription("SNAPSHOT_ERROR").withCause(e).asRuntimeException());
+            if (e instanceof RuntimeException && Status.fromThrowable(e).getCode() != Status.Code.UNKNOWN) {
+                throw (RuntimeException) e;
+            }
+            log.error("Error decompressing snapshot data", e);
+            throw Status.INTERNAL.withDescription("Failed to decompress snapshot: " + e.getMessage()).asRuntimeException();
         }
     }
 
     @Override
-    public void revertToSnapshot(RevertRequest req, StreamObserver<PlayerResponse> obs) {
-        String uuid = req.getUuid();
-
-        try {
-            Document snapshot = snapshotCollection.find(Filters.eq("_id", new ObjectId(req.getSnapshotId()))).first();
-
-            if (snapshot == null) {
-                obs.onError(Status.NOT_FOUND.withDescription("Snapshot not found").asRuntimeException());
-                return;
-            }
-
-            byte[] oldDataBytes = snapshot.get("data", org.bson.types.Binary.class).getData();
-            Document restoredDoc = Document.parse(new String(oldDataBytes, StandardCharsets.UTF_8));
-
-            playersCollection.replaceOne(Filters.eq("uuid", uuid), restoredDoc);
-
-            redisBytes.getdel("player:cache:" + uuid);
-
-            log.infof("Player %s reverted to snapshot %s", uuid, req.getSnapshotId());
-
-            obs.onNext(PlayerResponse.newBuilder().setUuid(uuid).build());
-            obs.onCompleted();
-
-        } catch (Exception e) {
-            log.errorf(e, "Failed to revert snapshot for %s", uuid);
-            obs.onError(Status.INTERNAL.withDescription("REVERT_ERROR").withCause(e).asRuntimeException());
-        }
+    public Uni<PlayerResponse> revertToSnapshot(RevertRequest request) {
+        return super.revertToSnapshot(request); //TODO
     }
 }

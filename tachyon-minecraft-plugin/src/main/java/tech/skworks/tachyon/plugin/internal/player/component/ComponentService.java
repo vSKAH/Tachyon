@@ -1,23 +1,28 @@
 package tech.skworks.tachyon.plugin.internal.player.component;
 
-import tech.skworks.tachyon.contracts.common.StandardResponse;
 import tech.skworks.tachyon.contracts.player.*;
-import tech.skworks.tachyon.libs.protobuf.Any;
-import tech.skworks.tachyon.libs.protobuf.Message;
-import tech.skworks.tachyon.plugin.TachyonCore;
-import tech.skworks.tachyon.plugin.internal.player.retry.RetryQueue;
+import tech.skworks.tachyon.libs.com.google.protobuf.Any;
+import tech.skworks.tachyon.libs.com.google.protobuf.Message;
+import tech.skworks.tachyon.libs.io.grpc.Status;
+import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
+import tech.skworks.tachyon.plugin.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.internal.retry.RetryQueue;
 import tech.skworks.tachyon.plugin.internal.util.AbstractGrpcService;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
-import tech.skworks.tachyon.plugin.internal.grpc.GrpcClientManager;
+import tech.skworks.tachyon.plugin.internal.GrpcClientManager;
 import tech.skworks.tachyon.plugin.internal.metric.scraper.TachyonMetrics;
-import tech.skworks.tachyon.plugin.internal.player.retry.RetryTask;
+import tech.skworks.tachyon.plugin.internal.retry.RetryTask;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.text.SimpleDateFormat;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -37,72 +42,103 @@ public class ComponentService extends AbstractGrpcService {
     private final ScheduledExecutorService retryScheduler;
     private final File dataFolder;
 
-
     public ComponentService(GrpcClientManager grpcClientManager, File dataFolder, @Nullable TachyonMetrics tachyonMetrics) {
         super(tachyonMetrics, grpcClientManager);
         this.dataFolder = dataFolder;
-        this.retryScheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofVirtual().name("tachyon-retry-", 1).factory());
-        this.retryScheduler.scheduleAtFixedRate(this::processAllRetries, 2, 1, TimeUnit.SECONDS);
+        this.retryScheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("tachyon-retry-scheduler").factory());
+        this.retryScheduler.scheduleAtFixedRate(this::processAllRetries, 2000L, 1200L, TimeUnit.MILLISECONDS);
     }
 
     @Nullable
     public PlayerResponse loadProfile(UUID uuid) {
         int attempts = 0;
-        try (var timer = startTimer("GetPlayer")) {
-            while (attempts < 4) {
-                PlayerResponse response = grpcClientManager.getPlayerStub(3).getPlayer(PlayerRequest.newBuilder().setUuid(uuid.toString()).build());
-                if (response.getErrorCode().isEmpty()) return response;
+        PlayerResponse playerResponse = null;
+        try (var _ = startTimer("GetPlayer")) {
+            while (playerResponse == null && attempts < 6) {
+                attempts++;
+                try {
+                    playerResponse = grpcClientManager.getPlayerStub(4).getPlayer(PlayerRequest.newBuilder().setUuid(uuid.toString()).build());
+                } catch (StatusRuntimeException e) {
+                    Status status = e.getStatus();
+                    if (status.getCode() == Status.Code.CANCELLED) {
+                        String reason = status.getDescription() != null ? status.getDescription() : "LOCKED";
+                        LOGGER.info("load() retry {}/4 for {} — reason: {}", attempts, uuid, reason);
 
-                String code = response.getErrorCode();
+                        if (attempts >= 4) {
+                            LOGGER.error("load() exhausted 4 attempts (2 seconds) for {}. Player remains locked.", uuid);
+                            return null;
+                        }
 
-                if ("DATA_DIRTY".equals(code) || "ALREADY_LOADED".equals(code)) {
-                    attempts++;
-                    LOGGER.info("load() retry {}/4 for {} — reason: {}", attempts, uuid, code);
-                    sleep(500);
-                    continue;
+                        try {
+                            Thread.sleep(500);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            LOGGER.error("load() interrupted while waiting for {} to unlock", uuid);
+                            return null;
+                        }
+                        continue;
+                    }
+
+                    LOGGER.error("load() gRPC infrastructure failure for {}: {}", uuid, status.getDescription());
+                    recordError("GetPlayer_Network", e);
+                    return null;
                 }
-
-                LOGGER.error("load() failed for {} — code: {}, detail: {}", uuid, code, response.getErrorDetails());
-                recordError("GetPlayer", code);
-                return null;
             }
-
-            LOGGER.error("load() exhausted 4 attempts for {}", uuid);
-            return null;
-
         } catch (Exception e) {
-            LOGGER.error(e, "load() network failure for {}", uuid);
-            recordError("GetPlayer", e);
+            LOGGER.error(e, "load() unexpected fatal failure for {}", uuid);
+            recordError("GetPlayer_Fatal", e);
             return null;
         }
+
+        return playerResponse;
     }
 
     public CompletableFuture<Void> saveProfile(UUID uuid, Collection<Message> components) {
         if (components.isEmpty()) return CompletableFuture.completedFuture(null);
 
-        SaveProfileRequest request = components.stream().reduce(SaveProfileRequest.newBuilder().setUuid(uuid.toString()),
-                (b, c) -> b.addComponents(Any.pack(c)), (a, b) -> a).build();
+        final SaveProfileRequest request = components.stream().reduce(SaveProfileRequest.newBuilder().setUuid(uuid.toString()), (b, c) -> b.addComponents(Any.pack(c)), (a, b) -> a).build();
+        final CompletableFuture<Void> future = new CompletableFuture<>();
+        final int count = components.size();
 
-        CompletableFuture<Void> future = new CompletableFuture<>();
-
-        int count = components.size();
         submit(uuid, new RetryTask(uuid) {
             @Override
             public boolean execute() {
-                try (var t = startTimer("SaveProfile")) {
-                    var stub = grpcClientManager.getPlayerStub(4);
-                    StandardResponse res = stub.saveProfile(request);
+                try (var _ = startTimer("SaveProfile")) {
+                    grpcClientManager.getPlayerStub(4).saveProfile(request);
 
-                    if (!res.getSuccess()) LOGGER.warn("saveProfile rejected for {}: {}", uuid, res.getMessage());
-                    else {
-                        future.complete(null);
+                    future.complete(null);
+                    return true;
+
+                } catch (StatusRuntimeException e) {
+                    //TODO: invalid argument on quarkus
+                    if (e.getStatus().getCode() == Status.Code.INVALID_ARGUMENT) {
+                        LOGGER.error(e, "Invalid argument in save profile, aborting the process.");
+                        future.completeExceptionally(e);
+                        return true;
                     }
-                    return res.getSuccess();
-                } catch (Exception e) {
-                    future.completeExceptionally(e);
-                    recordError("SaveProfile", e);
+
+                    LOGGER.warn("Transient gRPC error in save profile for {} ({} components), retrying...", uuid, count);
+                    recordError("SaveProfile_Transient", e);
                     return false;
+
+                } catch (Exception e) {
+                    LOGGER.error(e, "Unexpected exception in save profile, aborting the process.");
+                    future.completeExceptionally(e);
+                    recordError("SaveProfile_Fatal", e);
+                    return true;
                 }
+            }
+
+            @Override
+            public byte[] getPayload() {
+                return request.toByteArray();
+            }
+
+            @Override
+            public void onExhausted() {
+                final String errorMsg = String.format("Task %s exhausted after %d attempts", describe(), getAttempts());
+                LOGGER.error(errorMsg);
+                future.completeExceptionally(new TimeoutException(errorMsg));
             }
 
             @Override
@@ -110,35 +146,57 @@ public class ComponentService extends AbstractGrpcService {
                 return "SaveProfile(" + count + " components)";
             }
         });
+
         return future;
     }
 
     public <T extends Message> CompletableFuture<Void> saveComponent(UUID uuid, T component) {
-        Any packed = Any.pack(component);
-        String typeUrl = typeUrlOf(component);
-        CompletableFuture<Void> future = new CompletableFuture<>();
-
+        final Any packed = Any.pack(component);
+        final String typeUrl = typeUrlOf(component);
+        final CompletableFuture<Void> future = new CompletableFuture<>();
 
         submit(uuid, new RetryTask(uuid) {
             @Override
             public boolean execute() {
-                try (var t = startTimer("SaveComponent")) {
-                    StandardResponse res = grpcClientManager.getPlayerStub(3)
-                            .saveComponent(SaveComponentRequest.newBuilder()
-                                    .setUuid(uuid.toString())
-                                    .setComponent(packed)
-                                    .build());
+                try (var _ = startTimer("SaveComponent")) {
+                    grpcClientManager.getPlayerStub(4).
+                            saveComponent(SaveComponentRequest.newBuilder()
+                                    .setUuid(uuid.toString()).setComponent(packed).build());
 
-                    if (!res.getSuccess()) {
-                        LOGGER.warn("saveComponent rejected for {}: {}", uuid, res.getMessage());
-                    } else future.complete(null);
 
-                    return res.getSuccess();
-                } catch (Exception e) {
-                    future.completeExceptionally(e);
-                    recordError("SaveComponent", e);
+                    future.complete(null);
+                    return true;
+
+                } catch (StatusRuntimeException e) {
+                    //todo: throws invalid argument quarkus
+                    if (e.getStatus().getCode() == Status.Code.INVALID_ARGUMENT) {
+                        LOGGER.error(e, "Invalid argument in save component, aborting the process.");
+                        future.completeExceptionally(e);
+                        return true;
+                    }
+
+                    LOGGER.warn("Transient gRPC error in save component for {}, retrying...", uuid);
+                    recordError("SaveComponent_Transient", e);
                     return false;
+
+                } catch (Exception e) {
+                    LOGGER.error(e, "Unexpected exception in save component, aborting the process.");
+                    future.completeExceptionally(e);
+                    recordError("SaveComponent_Fatal", e);
+                    return true;
                 }
+            }
+
+            @Override
+            public byte[] getPayload() {
+                return packed.toByteArray();
+            }
+
+            @Override
+            public void onExhausted() {
+                final String errorMsg = String.format("Task %s exhausted after %d attempts", describe(), getAttempts());
+                LOGGER.error(errorMsg);
+                future.completeExceptionally(new TimeoutException(errorMsg));
             }
 
             @Override
@@ -146,32 +204,52 @@ public class ComponentService extends AbstractGrpcService {
                 return "SaveComponent(" + typeUrl + ")";
             }
         });
+
         return future;
     }
 
     public <T extends Message> CompletableFuture<Void> deleteComponent(UUID uuid, T component) {
-        String url = typeUrlOf(component);
-        CompletableFuture<Void> future = new CompletableFuture<>();
+        final String url = typeUrlOf(component);
+        final CompletableFuture<Void> future = new CompletableFuture<>();
 
         submit(uuid, new RetryTask(uuid) {
             @Override
             public boolean execute() {
-                try (var t = startTimer("DeleteComponent")) {
-                    StandardResponse res = grpcClientManager.getPlayerStub(3)
-                            .deleteComponent(DeleteComponentRequest.newBuilder()
-                                    .setUuid(uuid.toString())
-                                    .setComponentUrl(url)
-                                    .build());
+                try (var _ = startTimer("DeleteComponent")) {
+                    grpcClientManager.getPlayerStub(4).deleteComponent(DeleteComponentRequest.newBuilder().setUuid(uuid.toString()).setComponentUrl(url).build());
+                    future.complete(null);
+                    return true;
 
-                    if (!res.getSuccess()) {
-                        LOGGER.warn("deleteComponent rejected for {}: {}", uuid, res.getMessage());
-                    } else future.complete(null);
-                    return res.getSuccess();
-                } catch (Exception e) {
-                    future.completeExceptionally(e);
-                    recordError("DeleteComponent", e);
+                } catch (StatusRuntimeException e) {
+                    //todo: throws invalid argument on quarkus
+                    if (e.getStatus().getCode() == Status.Code.INVALID_ARGUMENT) {
+                        LOGGER.error(e, "Invalid argument in delete component, aborting the process.");
+                        future.completeExceptionally(e);
+                        return true;
+                    }
+
+                    LOGGER.warn("Transient gRPC error in delete component for {}, retrying...", uuid);
+                    recordError("DeleteComponent_Transient", e);
                     return false;
+
+                } catch (Exception e) {
+                    LOGGER.error(e, "Unexpected exception in delete component, aborting the process.");
+                    future.completeExceptionally(e);
+                    recordError("DeleteComponent_Fatal", e);
+                    return true;
                 }
+            }
+
+            @Override
+            public byte[] getPayload() {
+                return url.getBytes(StandardCharsets.UTF_8);
+            }
+
+            @Override
+            public void onExhausted() {
+                final String errorMsg = String.format("Task %s exhausted after %d attempts", describe(), getAttempts());
+                LOGGER.error(errorMsg);
+                future.completeExceptionally(new TimeoutException(errorMsg));
             }
 
             @Override
@@ -179,25 +257,55 @@ public class ComponentService extends AbstractGrpcService {
                 return "DeleteComponent(" + url + ")";
             }
         });
+
         return future;
+    }
+
+    private void submit(UUID uuid, RetryTask task) {
+        retryQueues.computeIfAbsent(uuid, RetryQueue::new).submit(task, this::writeToDeadLetterFile);
+    }
+
+    private void processAllRetries() {
+        int total = 0;
+
+        var iterator = retryQueues.entrySet().iterator();
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+            RetryQueue queue = entry.getValue();
+
+            queue.process(this::writeToDeadLetterFile);
+
+            int size = queue.size();
+            if (size == 0) {
+                iterator.remove();
+            } else {
+                total += size;
+            }
+        }
+
+        if (tachyonMetrics != null) tachyonMetrics.updateRetryQueueSize(total);
     }
 
     public void flushQueueForPlayer(UUID uuid) {
         RetryQueue queue = retryQueues.get(uuid);
         if (queue == null) return;
-        queue.flush(this::writeToDeadLetterFile);
-        if (queue.isEmpty()) retryQueues.remove(uuid);
+
+        queue.process(this::writeToDeadLetterFile);
+
+        if (queue.isEmpty()) {
+            retryQueues.remove(uuid);
+        }
     }
 
     public void shutdown() {
         retryScheduler.shutdown();
-        LOGGER.info("Shutdown: flushing all pending queues...");
+        LOGGER.info("Shutdown: processing all pending queues...");
 
-        retryQueues.forEach((uuid, queue) -> queue.flush(this::writeToDeadLetterFile));
+        retryQueues.values().forEach(queue -> queue.process(this::writeToDeadLetterFile));
 
         retryQueues.forEach((uuid, queue) -> {
             if (!queue.isEmpty()) {
-                LOGGER.error("[SHUTDOWN] {} task(s) could not be flushed for {} — writing to dead-letter", queue.size(), uuid);
+                LOGGER.error("[SHUTDOWN] {} task(s) could not be processed for {} — writing to dead-letter", queue.size(), uuid);
                 queue.drainToDeadLetter(this::writeToDeadLetterFile);
             }
         });
@@ -206,35 +314,32 @@ public class ComponentService extends AbstractGrpcService {
         LOGGER.info("Shutdown complete.");
     }
 
-    private void submit(UUID uuid, RetryTask task) {
-        retryQueues.computeIfAbsent(uuid, RetryQueue::new).submit(task);
-    }
+    private static final DateTimeFormatter LOG_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter FILE_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
-    private void processAllRetries() {
-        int total = 0;
-        for (UUID uuid : retryQueues.keySet()) {
-            flushQueueForPlayer(uuid);
-            RetryQueue q = retryQueues.get(uuid);
-            if (q != null) total += q.size();
-        }
-        if (tachyonMetrics != null) tachyonMetrics.updateRetryQueueSize(total);
-    }
+    private void writeToDeadLetterFile(final @Nonnull RetryTask task) {
+        final LocalDateTime now = LocalDateTime.now();
+        final String logTimestamp = now.format(LOG_DATE_FORMAT);
+        final String fileTimestamp = now.format(FILE_DATE_FORMAT);
 
-    private void writeToDeadLetterFile(RetryTask task) {
-        LOGGER.error("[FATAL] Task exhausted for {}: {}", task.getUuid(), task.describe());
-        try (var out = new PrintWriter(new FileWriter(new File(dataFolder, "recovery.log"), true))) {
-            out.printf("[%s] UUID: %s | %s%n", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()), task.getUuid(), task.describe());
-        } catch (IOException e) {
-            LOGGER.error(e, "[FATAL] Cannot write to recovery.log!");
-        }
-    }
+        final String fileName = String.format("%s_%s_%s.bin", fileTimestamp, task.getUuid(), task.describe().replaceAll("[^a-zA-Z0-9]", "_"));
 
-    private static void sleep(long ms) {
         try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            LOGGER.error(e, "Unable to sleep thread");
-            Thread.currentThread().interrupt();
+            final Path recoveryDir = dataFolder.toPath().resolve("recovery");
+            Files.createDirectories(recoveryDir);
+
+            final byte[] payload = task.getPayload();
+            if (payload != null && payload.length > 0) {
+                Files.write(recoveryDir.resolve(fileName), payload, StandardOpenOption.CREATE);
+            }
+
+            final Path logPath = dataFolder.toPath().resolve("recovery.log");
+            final String logLine = String.format("[%s] FATAL: %s | Data saved to: %s%n", logTimestamp, task.getUuid(), fileName);
+            Files.writeString(logPath, logLine, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+
+            LOGGER.error("[RECOVERY] Data for {} saved to {}", task.getUuid(), fileName);
+        } catch (IOException e) {
+            LOGGER.error(e, "[CRITICAL] Failed to save recovery data for " + task.getUuid());
         }
     }
 

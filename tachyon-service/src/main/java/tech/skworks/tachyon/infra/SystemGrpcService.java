@@ -1,11 +1,11 @@
 package tech.skworks.tachyon.infra;
 
-import io.grpc.stub.StreamObserver;
 import io.quarkus.grpc.GrpcService;
-import io.smallrye.common.annotation.Blocking;
+import io.smallrye.common.annotation.NonBlocking;
+import io.smallrye.mutiny.Uni;
+import tech.skworks.tachyon.contracts.system.MutinySystemGrpc;
 import tech.skworks.tachyon.contracts.system.PingRequest;
 import tech.skworks.tachyon.contracts.system.PingResponse;
-import tech.skworks.tachyon.contracts.system.SystemGrpc;
 
 /**
  * Project Tachyon
@@ -16,13 +16,13 @@ import tech.skworks.tachyon.contracts.system.SystemGrpc;
  * @since 1.0.0-SNAPSHOT
  */
 @GrpcService
-@Blocking
-public class SystemGrpcService extends SystemGrpc.SystemImplBase {
+@NonBlocking
+public class SystemGrpcService extends MutinySystemGrpc.SystemImplBase {
 
     @Override
-    public void ping(PingRequest request, StreamObserver<PingResponse> obs) {
-        obs.onNext(PingResponse.newBuilder().setServerTime(System.currentTimeMillis()).setMessage("PONG - Quarkus is online!").build());
-        obs.onCompleted();
+    public Uni<PingResponse> ping(PingRequest request) {
+        long serverTime = System.currentTimeMillis();
+        return Uni.createFrom().item(PingResponse.newBuilder().setServerTime(serverTime).build());
     }
 
 }

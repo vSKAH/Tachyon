@@ -1,6 +1,7 @@
 package tech.skworks.tachyon.player;
 
 import io.smallrye.config.ConfigMapping;
+import io.smallrye.config.WithDefault;
 
 /**
  * Project Tachyon
@@ -12,7 +13,10 @@ import io.smallrye.config.ConfigMapping;
  */
 @ConfigMapping(prefix = "tachyon.player")
 public interface PlayerConfig {
-    String streamKey();
-    String collection();
-    String snapshotsCollection();
+
+    @WithDefault("tachyon:player_stream") String streamKey();
+    @WithDefault("tachyon:player_group") String streamGroupName();
+    @WithDefault("tachyon:player_worker_1") String consumerId();
+
+    @WithDefault("players") String collection();
 }

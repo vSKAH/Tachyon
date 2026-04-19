@@ -1,4 +1,4 @@
-package tech.skworks.tachyon.plugin.internal.config;
+package tech.skworks.tachyon.plugin.plugin.config;
 
 import org.bukkit.configuration.file.FileConfiguration;
 
@@ -16,8 +16,9 @@ public record TachyonConfig(String serverName, String grpcHost, int grpcPort, bo
         return new TachyonConfig(configuration.getString("server-name", "lobby-01"),
                 configuration.getString("grpc.host", "0.0.0.0"),
                 configuration.getInt("grpc.port", 9000),
-                configuration.getBoolean("grpc.log-heartbeats", true),
-                configuration.getString("metrics.host", "0.0.0.0"), configuration.getInt("metrics.port"));
+                configuration.getBoolean("grpc.log-heartbeats", false),
+                configuration.getString("metrics.host", "0.0.0.0"),
+                configuration.getInt("metrics.port"));
     }
 
 }

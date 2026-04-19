@@ -11,9 +11,10 @@ import me.lucko.spark.api.statistic.types.DoubleStatistic;
 import me.lucko.spark.api.statistic.types.GenericStatistic;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
-import tech.skworks.tachyon.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.plugin.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 
 import java.lang.management.ManagementFactory;
@@ -36,7 +37,7 @@ import java.util.logging.LogRecord;
 public class VanillaMetrics {
 
     private final String serverName;
-    private final org.bukkit.plugin.Plugin plugin;
+    private final TachyonCore plugin;
     private BukkitTask metricsTask;
     private Handler errorAppender;
     private Spark spark;
@@ -65,14 +66,14 @@ public class VanillaMetrics {
 
     private static final Counter CONSOLE_LOGS = Counter.build().name("spigot_console_logs_total").help("Compteur d'erreurs et alertes dans la console").labelNames("server_name", "level").register();
 
-    public VanillaMetrics(String serverName, JavaPlugin plugin) {
+    public VanillaMetrics(String serverName, TachyonCore plugin) {
         this.serverName = serverName;
         this.plugin = plugin;
     }
 
     public void start() {
         if (Bukkit.getPluginManager().getPlugin("spark") == null) {
-            LOGGER.warn("Spark plugin not found. Spark must be installed to use metrics.");
+            LOGGER.warn("Spark plugin not found. Spark must be installed to use vanilla metrics.");
             return;
         }
         try {
@@ -80,6 +81,7 @@ public class VanillaMetrics {
             LOGGER.info("Successfully hooked into Spark Profiler API!");
         } catch (Exception e) {
             LOGGER.error(e, "Found Spark but failed to get API");
+            return;
         }
 
         attachBukkitHandler();
@@ -127,6 +129,7 @@ public class VanillaMetrics {
     }
 
     private void updateMetrics() {
+        if (plugin.tachyonCoreDisabling()) return;
         final int onlinePlayerCount = Bukkit.getOnlinePlayers().size();
         final int uniquePlayerCount = Bukkit.getOfflinePlayers().length;
 

@@ -1,7 +1,7 @@
 syntax = "proto3";
 package tachyon.player;
 
-import "common.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/any.proto";
 
 option java_multiple_files = true;
@@ -9,12 +9,12 @@ option java_package = "tech.skworks.tachyon.contracts.player";
 
 service PlayerDataService {
   rpc GetPlayer             (PlayerRequest)          returns (PlayerResponse);
-  rpc SaveComponent         (SaveComponentRequest)   returns (tachyon.common.StandardResponse);
-  rpc SaveProfile           (SaveProfileRequest)     returns (tachyon.common.StandardResponse);
-  rpc DeleteComponent       (DeleteComponentRequest) returns (tachyon.common.StandardResponse);
-  rpc PlayerHeartBeat       (PlayerRequest)          returns (tachyon.common.StandardResponse);
-  rpc PlayerHeartBeatBatch  (HeartBeatBatchRequest)  returns (tachyon.common.StandardResponse);
-  rpc FreePlayer            (PlayerRequest)          returns (tachyon.common.StandardResponse);
+  rpc SaveComponent         (SaveComponentRequest)   returns (google.protobuf.Empty);
+  rpc SaveProfile           (SaveProfileRequest)     returns (google.protobuf.Empty);
+  rpc DeleteComponent       (DeleteComponentRequest) returns (google.protobuf.Empty);
+  rpc PlayerHeartBeat       (PlayerRequest)          returns (google.protobuf.Empty);
+  rpc PlayerHeartBeatBatch  (HeartBeatBatchRequest)  returns (google.protobuf.Empty);
+  rpc FreePlayer            (PlayerRequest)          returns (google.protobuf.Empty);
 }
 
 message PlayerRequest {
@@ -23,9 +23,6 @@ message PlayerRequest {
 
 message PlayerResponse {
   string uuid = 1;
-  bool success = 2;
-  string error_code = 3;
-  string error_details = 4;
   repeated google.protobuf.Any components = 5;
 }
 

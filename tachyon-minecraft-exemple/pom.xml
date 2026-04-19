@@ -101,7 +101,7 @@
                     <replacements>
                         <replacement>
                             <token>com\.google\.protobuf</token>
-                            <value>tech.skworks.tachyon.libs.protobuf</value>
+                            <value>tech.skworks.tachyon.libs.com.google.protobuf</value>
                         </replacement>
                     </replacements>
                 </configuration>

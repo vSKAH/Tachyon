@@ -3,13 +3,14 @@ package tech.skworks.tachyon.snapshot;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Indexes;
+import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.stream.XGroupCreateArgs;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.player.PlayerConfig;
 
 import java.util.ArrayList;
 
@@ -25,22 +26,37 @@ import java.util.ArrayList;
 public class SnapshotStartup {
 
     @Inject
-    SnapshotConfig config;
+    SnapshotConfig snapshotConfig;
     @Inject
     Logger log;
 
     @Inject
+    RedisDataSource redisDS;
+
+    @Inject
     MongoClient mongo;
-    @ConfigProperty(name = "tachyon.database.name")
+    @ConfigProperty(name = "quarkus.mongodb.database")
     String mongoDatabase;
 
     void onStart(@Observes StartupEvent ev) {
+
+        try {
+            redisDS.stream(String.class).xgroupCreate(snapshotConfig.streamKey(), snapshotConfig.streamGroupName(), "0", new XGroupCreateArgs().mkstream());
+            log.infof("Redis Stream [%s] initialized successfully.", snapshotConfig.streamKey());
+        } catch (Exception e) {
+            if (e.getMessage() != null && e.getMessage().contains("BUSYGROUP")) {
+                log.debugf("Redis Stream [%s] already exists!", snapshotConfig.streamKey());
+            } else {
+                throw new RuntimeException("Unable to init the Redis Stream for player", e);
+            }
+        }
+
         MongoDatabase database = mongo.getDatabase(mongoDatabase);
 
-        boolean exists = database.listCollectionNames().into(new ArrayList<>()).contains(config.snapshotsCollection());
+        boolean exists = database.listCollectionNames().into(new ArrayList<>()).contains(snapshotConfig.collection());
         if (!exists) {
-            database.createCollection(config.snapshotsCollection());
-            database.getCollection(config.snapshotsCollection()).createIndex(Indexes.compoundIndex(Indexes.ascending("uuid"), Indexes.descending("timestamp")));
+            database.createCollection(snapshotConfig.collection());
+            database.getCollection(snapshotConfig.collection()).createIndex(Indexes.compoundIndex(Indexes.ascending("uuid"), Indexes.descending("timestamp")));
         }
         log.info("MongoDB indexes for Snapshot module verified/created.");
     }

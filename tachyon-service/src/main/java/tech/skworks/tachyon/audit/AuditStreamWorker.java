@@ -41,11 +41,10 @@ class AuditStreamWorker {
     @Inject
     AuditConfig config;
 
-    @ConfigProperty(name = "tachyon.database.name")
+    @ConfigProperty(name = "quarkus.mongodb.database")
     String dbName;
 
     private final StreamCommands<String, String, byte[]> redisStream;
-    private final String consumerId = "audit-worker-" + UUID.randomUUID().toString().substring(0, 8);
 
     private MongoCollection<Document> auditCollection;
 
@@ -56,13 +55,13 @@ class AuditStreamWorker {
     @PostConstruct
     void init() {
         this.auditCollection = mongo.getDatabase(dbName).getCollection(config.collection());
-        log.infof("[AuditStreamWorker] Initialized with consumer ID '%s' on stream '%s'.", consumerId, config.streamKey());
+        log.infof("[AuditStreamWorker] Initialized with consumer ID '%s' on stream '%s'.", config.consumerId(), config.streamKey());
     }
 
-    @Scheduled(every = "2s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    @Scheduled(every = "1s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void processAuditStream() {
         try {
-            List<StreamMessage<String, String, byte[]>> messages = redisStream.xreadgroup("tachyon_audit_workers", consumerId, config.streamKey(), ">", new XReadGroupArgs().count(100));
+            List<StreamMessage<String, String, byte[]>> messages = redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(100));
 
             if (messages == null || messages.isEmpty()) return;
 
@@ -87,7 +86,7 @@ class AuditStreamWorker {
             }
 
             if (!idsToAck.isEmpty()) {
-                redisStream.xack(config.streamKey(), "tachyon_audit_workers", idsToAck.toArray(new String[0]));
+                redisStream.xack(config.streamKey(), config.streamGroupName(), idsToAck.toArray(new String[0]));
             }
 
         } catch (Exception e) {

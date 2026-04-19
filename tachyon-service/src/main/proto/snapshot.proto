@@ -1,23 +1,71 @@
 syntax = "proto3";
 package tachyon.snapshot;
 
-import "common.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/any.proto";
+
 import "player.proto";
 
 option java_multiple_files = true;
 option java_package = "tech.skworks.tachyon.contracts.snapshot";
 
 service SnapshotService {
-  rpc CreateSnapshot (SnapshotRequest) returns (tachyon.common.StandardResponse);
+  rpc CreateSnapshot (SnapshotRequest) returns (google.protobuf.Empty);
+  rpc CreateSpecificSnapshot (SpecificSnapshotRequest) returns (google.protobuf.Empty);
   rpc RevertToSnapshot (RevertRequest) returns (tachyon.player.PlayerResponse);
+  rpc ListSnapshots (SnapshotListRequest) returns (SnapshotListResponse);
+  rpc ViewSnapshot (ViewSnapshotRequest) returns (DecodeSnapshotResponse);
+}
+
+message SnapshotListRequest {
+  string uuid = 1;
+}
+
+message SnapshotListResponse {
+  string uuid = 1;
+  repeated SnapshotInfo snapshots = 2;
+}
+
+message SnapshotInfo {
+  string snapshot_id = 1;
+  int64 timestamp = 2;
+  SnapshotTriggerType trigger_type = 3;
+  string reason = 4;
+  string source = 5;
+  string granularity = 6;
+}
+
+message ViewSnapshotRequest {
+  string snapshot_id = 1;
+}
+
+message DecodeSnapshotResponse {
+  string snapshot_id = 1;
+  map<string, google.protobuf.Any> components = 2;
+}
+
+enum SnapshotTriggerType {
+  SPIGOT_TASK = 0;
+  MANUAL = 1;
+  OTHER = 2;
+}
+
+message SpecificSnapshotRequest {
+  SnapshotTriggerType trigger_type = 1;
+  string uuid = 2;
+  string reason = 3;
+  string target_component = 4;
+  bytes raw_data = 5;
 }
 
 message SnapshotRequest {
-  string uuid = 1;
-  string reason = 2;
+  SnapshotTriggerType trigger_type = 1;
+  string uuid = 2;
+  string reason = 3;
 }
 
 message RevertRequest {
   string uuid = 1;
   string snapshot_id = 2;
 }
+

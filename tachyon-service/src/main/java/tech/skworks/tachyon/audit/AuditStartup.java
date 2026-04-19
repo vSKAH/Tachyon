@@ -28,33 +28,31 @@ class AuditStartup {
 
     @Inject
     Logger log;
+    @Inject
+    AuditConfig auditConfig;
 
     @Inject
     RedisDataSource redisDS;
 
     @Inject
     MongoClient mongo;
-
-    @Inject
-    AuditConfig config;
-
-    @ConfigProperty(name = "tachyon.database.name")
+    @ConfigProperty(name = "quarkus.mongodb.database")
     String mongoDatabase;
 
     void onStart(@Observes StartupEvent ev) {
         MongoDatabase db = mongo.getDatabase(mongoDatabase);
 
-        boolean exists = db.listCollectionNames().into(new ArrayList<>()).contains(config.collection());
+        boolean exists = db.listCollectionNames().into(new ArrayList<>()).contains(auditConfig.collection());
         if (!exists) {
-            db.createCollection(config.collection(), new CreateCollectionOptions().timeSeriesOptions(new TimeSeriesOptions("timestamp").metaField("uuid").granularity(TimeSeriesGranularity.SECONDS)).expireAfter(180L, TimeUnit.DAYS));
+            db.createCollection(auditConfig.collection(), new CreateCollectionOptions().timeSeriesOptions(new TimeSeriesOptions("timestamp").metaField("uuid").granularity(TimeSeriesGranularity.SECONDS)).expireAfter(180L, TimeUnit.DAYS));
         }
 
         try {
-            redisDS.stream(String.class).xgroupCreate(config.streamKey(), "tachyon_audit_workers", "0", new XGroupCreateArgs().mkstream());
-            log.infof("Redis Stream [%s] initialized successfully.", config.streamKey());
+            redisDS.stream(String.class).xgroupCreate(auditConfig.streamKey(), auditConfig.streamGroupName(), "0", new XGroupCreateArgs().mkstream());
+            log.infof("Redis Stream [%s] initialized successfully.", auditConfig.streamKey());
         } catch (Exception e) {
             if (e.getMessage() != null && e.getMessage().contains("BUSYGROUP")) {
-                log.debugf("Redis Stream [%s] already exists!", config.streamKey());
+                log.debugf("Redis Stream [%s] already exists!", auditConfig.streamKey());
             } else {
                 throw new RuntimeException("Unable to init the Redis Stream for audit", e);
             }

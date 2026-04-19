@@ -38,13 +38,6 @@
 
         <dependency>
             <groupId>tech.sk-works.minecraft</groupId>
-            <artifactId>tachyon-libs</artifactId>
-            <version>1.0.0</version>
-            <scope>compile</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>tech.sk-works.minecraft</groupId>
             <artifactId>tachyon-minecraft-api</artifactId>
             <version>1.0.0</version>
             <scope>compile</scope>
@@ -55,6 +48,13 @@
             <artifactId>spark-api</artifactId>
             <version>0.1-SNAPSHOT</version>
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>dev.triumphteam</groupId>
+            <artifactId>triumph-gui</artifactId>
+            <version>3.1.13</version>
+            <scope>compile</scope>
         </dependency>
 
         <dependency>
@@ -69,6 +69,14 @@
             <version>0.16.0</version>
             <scope>compile</scope>
         </dependency>
+
+        <dependency>
+            <groupId>com.github.luben</groupId>
+            <artifactId>zstd-jni</artifactId>
+            <version>1.5.5-11</version>
+            <scope>compile</scope>
+        </dependency>
+
     </dependencies>
 
     <build>
@@ -84,10 +92,22 @@
                             <goal>shade</goal>
                         </goals>
                         <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <minimizeJar>true</minimizeJar>
                             <transformers>
                                 <transformer
                                         implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
+                            <relocations>
+                                <relocation>
+                                    <pattern>io.prometheus</pattern>
+                                    <shadedPattern>tech.skworks.tachyon.libs.io.prometheus</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>dev.triumphteam.gui</pattern>
+                                    <shadedPattern>tech.skworks.tachyon.libs.dev.triumphteam.gui</shadedPattern>
+                                </relocation>
+                            </relocations>
                         </configuration>
                     </execution>
                 </executions>

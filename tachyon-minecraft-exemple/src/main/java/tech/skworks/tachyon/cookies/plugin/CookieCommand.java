@@ -4,8 +4,12 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 import tech.skworks.cookies.components.CookieComponent;
+import tech.skworks.tachyon.api.TachyonAPI;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
+
+import java.util.UUID;
 
 /**
  * Project Tachyon
@@ -17,10 +21,10 @@ import tech.skworks.tachyon.api.profile.TachyonProfile;
  */
 public class CookieCommand implements CommandExecutor {
 
-    private final TachyonCookies plugin;
+    private final TachyonAPI<ItemStack> tachyon;
 
     public CookieCommand(TachyonCookies plugin) {
-        this.plugin = plugin;
+        this.tachyon = plugin.getTachyon();
     }
 
     @Override
@@ -30,7 +34,8 @@ public class CookieCommand implements CommandExecutor {
             return true;
         }
 
-        TachyonProfile profile = plugin.getTachyon().getProfile(player.getUniqueId());
+        final UUID playerId = player.getUniqueId();
+        final TachyonProfile profile = tachyon.getProfile(playerId);
         if (profile == null) {
             player.sendMessage("§cError: Your profile is not loaded from Tachyon yet.");
             return true;
@@ -43,10 +48,9 @@ public class CookieCommand implements CommandExecutor {
             long newCookiesAmount = component.getCookies() + 1;
 
             //Update the component
-            profile.updateComponent(CookieComponent.class, (CookieComponent.Builder builder) -> {
-                builder.setCookies(newCookiesAmount);
-            });
+            profile.updateComponent(CookieComponent.class, (CookieComponent.Builder builder) -> builder.setCookies(newCookiesAmount));
 
+            tachyon.getAuditService().log(playerId.toString(), "GAIN_COOKIES", "+1");
             player.sendMessage("§6+1 Cookie ! §e(Total : " + newCookiesAmount + ")");
             return true;
         }

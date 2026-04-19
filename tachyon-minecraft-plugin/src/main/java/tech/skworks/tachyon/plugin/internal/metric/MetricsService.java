@@ -2,7 +2,7 @@ package tech.skworks.tachyon.plugin.internal.metric;
 
 import io.prometheus.client.exporter.HTTPServer;
 import org.bukkit.plugin.java.JavaPlugin;
-import tech.skworks.tachyon.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.plugin.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.internal.metric.scraper.TachyonMetrics;
 import tech.skworks.tachyon.plugin.internal.metric.scraper.VanillaMetrics;
@@ -25,7 +25,7 @@ public class MetricsService {
 
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("MetricsService");
 
-    public MetricsService(String serverName, JavaPlugin javaPlugin) {
+    public MetricsService(String serverName, TachyonCore javaPlugin) {
         this.collectionRunning = false;
         this.tachyonMetrics = new TachyonMetrics(serverName, javaPlugin);
         this.vanillaMetrics = new VanillaMetrics(serverName, javaPlugin);

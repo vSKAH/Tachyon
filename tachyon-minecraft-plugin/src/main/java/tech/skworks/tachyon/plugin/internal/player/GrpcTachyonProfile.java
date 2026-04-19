@@ -1,13 +1,14 @@
 package tech.skworks.tachyon.plugin.internal.player;
 
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.NonNull;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
-import tech.skworks.tachyon.libs.protobuf.Message;
-import tech.skworks.tachyon.plugin.TachyonCore;
+import tech.skworks.tachyon.libs.com.google.protobuf.Message;
+import tech.skworks.tachyon.plugin.plugin.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.player.component.ComponentService;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,16 +31,17 @@ import java.util.function.Consumer;
  * @version 1.0
  * @since 1.0.0-SNAPSHOT
  */
-public class PlayerProfile implements TachyonProfile {
+public class GrpcTachyonProfile implements TachyonProfile {
 
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("PlayerProfile");
+
     private final UUID uuid;
     private final ComponentService componentService;
 
     private final Set<Class<?>> dirty = ConcurrentHashMap.newKeySet();
     private final Map<Class<?>, Message> components = new ConcurrentHashMap<>();
 
-    public PlayerProfile(UUID uuid, ComponentService componentService) {
+    public GrpcTachyonProfile(UUID uuid, ComponentService componentService) {
         this.uuid = uuid;
         this.componentService = componentService;
     }
@@ -49,7 +51,7 @@ public class PlayerProfile implements TachyonProfile {
      * Does NOT mark the component as dirty — avoids unnecessary saves at disconnect.
      * Called exclusively by ProfileManager.load().
      */
-    public <T extends Message> void initComponent(T component) {
+    public <T extends Message> void initComponent(@NotNull final T component) {
         components.put(component.getClass(), component);
     }
 
@@ -59,7 +61,7 @@ public class PlayerProfile implements TachyonProfile {
      * Does NOT trigger an immediate gRPC save — use saveComponent() for that.
      */
     @Override
-    public <T extends Message> void setComponent(T component) {
+    public <T extends Message> void setComponent(@NonNull final T component) {
         components.put(component.getClass(), component);
         dirty.add(component.getClass());
     }
@@ -70,7 +72,7 @@ public class PlayerProfile implements TachyonProfile {
      */
     @Override
     @SuppressWarnings("unchecked")
-    public <T extends Message, B extends Message.Builder> void updateComponent(Class<T> clazz, Consumer<B> modifier) {
+    public <T extends Message, B extends Message.Builder> void updateComponent(@NonNull final Class<T> clazz, @NonNull final Consumer<B> modifier) {
         T current = (T) components.get(clazz);
         if (current == null) {
             LOGGER.warn("updateComponent() called for {} on player {} but component is not loaded.", clazz.getSimpleName(), uuid);
@@ -89,16 +91,26 @@ public class PlayerProfile implements TachyonProfile {
      */
     @Override
     @SuppressWarnings("unchecked")
-    public @Nullable <T extends Message> T getComponent(Class<T> clazz) {
+    public @Nullable <T extends Message> T getComponent(@NonNull final Class<T> clazz) {
         return (T) components.get(clazz);
+    }
+
+    /**
+     * Returns the current in-memory value of a component, or null if not loaded.
+     */
+    @SuppressWarnings("unchecked")
+    public @Nullable <T extends Message> T getComponent(@NotNull final String componentShortName) {
+        Collection<Message> copy = List.copyOf(components.values());
+        return (T) copy.stream().filter(component -> component.getDescriptorForType().getName().equals(componentShortName)).findFirst().orElse(null);
     }
 
     /**
      * Returns the current in-memory value of a component, or default value if not loaded.
      */
+
     @Override
     @SuppressWarnings("unchecked")
-    public <T extends Message> T getComponent(Class<T> clazz, @Nonnull T defaultValue) {
+    public <T extends Message> T getComponent(@NotNull final Class<T> clazz, @NotNull final T defaultValue) {
         if (!components.containsKey(clazz)) {
             setComponent(defaultValue);
             return defaultValue;
@@ -111,7 +123,7 @@ public class PlayerProfile implements TachyonProfile {
      * If the gRPC call hasn't completed by disconnect time, saveProfile() will retry it.
      */
     @Override
-    public <T extends Message> CompletableFuture<Void> saveComponent(T component) {
+    public <T extends Message> CompletableFuture<Void> saveComponent(@NotNull final T component) {
         components.put(component.getClass(), component);
         dirty.add(component.getClass());
         return componentService.saveComponent(uuid, component);
@@ -121,10 +133,10 @@ public class PlayerProfile implements TachyonProfile {
      * Removes a component from memory and enqueues a delete via gRPC.
      */
     @Override
-    public <T extends Message> CompletableFuture<Void> deleteComponent(T defaultValue) {
-        components.remove(defaultValue.getClass());
-        dirty.remove(defaultValue.getClass());
-        return componentService.deleteComponent(uuid, defaultValue);
+    public <T extends Message> CompletableFuture<Void> deleteComponent(@NotNull final T component) {
+        components.remove(component.getClass());
+        dirty.remove(component.getClass());
+        return componentService.deleteComponent(uuid, component);
     }
 
     /**
@@ -132,6 +144,7 @@ public class PlayerProfile implements TachyonProfile {
      * Clears the dirty set on success. On failure, components remain dirty
      * so the next attempt (e.g. retry scheduler) will pick them up.
      */
+
     @Override
     public CompletableFuture<Void> saveProfile() {
         if (dirty.isEmpty()) {
@@ -146,7 +159,7 @@ public class PlayerProfile implements TachyonProfile {
 
         return componentService.saveProfile(uuid, toSave).whenComplete((result, exception) -> {
             if (exception == null) {
-                dirty.removeAll(capturedDirtyClasses);
+                capturedDirtyClasses.forEach(dirty::remove);
                 LOGGER.info("saveProfile() completed successfully for {}.", uuid);
             } else {
                 LOGGER.error("saveProfile() failed for {} — {} component(s) remain dirty for retry: {}", uuid, capturedDirtyClasses.size(), exception.getMessage());

@@ -1,12 +1,13 @@
 package tech.skworks.tachyon.plugin.internal.audit;
 
 import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.NotNull;
+import tech.skworks.tachyon.api.services.AuditService;
 import tech.skworks.tachyon.contracts.audit.LogBatchRequest;
 import tech.skworks.tachyon.contracts.audit.LogRequest;
-import tech.skworks.tachyon.contracts.common.StandardResponse;
-import tech.skworks.tachyon.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.plugin.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
-import tech.skworks.tachyon.plugin.internal.grpc.GrpcClientManager;
+import tech.skworks.tachyon.plugin.internal.GrpcClientManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,7 +21,7 @@ import java.util.concurrent.*;
  * @version 1.0
  * @since 1.0.0-SNAPSHOT
  */
-public class AuditManager {
+public class GrpcAuditService implements AuditService {
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("AuditManager");
 
     private final GrpcClientManager grpcClientManager;
@@ -31,7 +32,7 @@ public class AuditManager {
     private final ScheduledExecutorService scheduler;
     private final ExecutorService flushExecutor;
 
-    public AuditManager(GrpcClientManager grpcClientManager, String serverName) {
+    public GrpcAuditService(GrpcClientManager grpcClientManager, String serverName) {
         this.grpcClientManager = grpcClientManager;
         this.serverName        = serverName;
         this.flushExecutor = Executors.newSingleThreadExecutor(Thread.ofVirtual().name("tachyon-audit-emergency-flush-", 1).factory());
@@ -45,7 +46,8 @@ public class AuditManager {
      * Thread-safe. If the buffer is full, an async emergency flush is triggered
      * and the entry is dropped (logged as SEVERE).
      */
-    public void log(String uuid, String action, String details) {
+    @Override
+    public void log(@NotNull final String uuid, @NotNull final String action, @NotNull final String details) {
         LogRequest entry = LogRequest.newBuilder()
                 .setUuid(uuid)
                 .setModule(serverName)
@@ -76,12 +78,7 @@ public class AuditManager {
         if (batch.isEmpty()) return;
 
         try {
-            StandardResponse response = grpcClientManager.getAuditStub(1).logEventBatch(LogBatchRequest.newBuilder().addAllLogs(batch).build());
-
-            if (!response.getSuccess()) {
-                LOGGER.warn("Audit service returned success=false for batch of {} entries: {}", batch.size(), response.getMessage());
-                requeue(batch);
-            }
+            grpcClientManager.getAuditStub(1).logEventBatch(LogBatchRequest.newBuilder().addAllLogs(batch).build());
         } catch (Exception e) {
             LOGGER.log(Level.WARN, e, "gRPC call to audit service failed — requeueing {} entries.", batch.size());
             requeue(batch);

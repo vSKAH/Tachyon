@@ -1,4 +1,4 @@
-package tech.skworks.tachyon.plugin.internal.player.retry;
+package tech.skworks.tachyon.plugin.internal.retry;
 
 import java.util.UUID;
 
@@ -22,6 +22,10 @@ public abstract class RetryTask {
     }
 
     public abstract boolean execute();
+
+    public abstract byte[] getPayload();
+
+    public abstract void onExhausted();
 
     public abstract String describe();
 

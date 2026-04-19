@@ -58,13 +58,16 @@ message CookieComponent {
 }
 ```
 
-### 2. Extend `TachyonPlugin`
-Make your main plugin class extend `TachyonPlugin` instead of `JavaPlugin`. Be sure to add `Tachyon-Core` to your `plugin.yml` dependencies!
+### 2. Extend `JavaPlugin`
+Make your main plugin class extend `JavaPlugin` like a normal plugin.
+Be sure to add `Tachyon-Core` to your `plugin.yml` dependencies!
+
+Get the instance of TachyonAPI<ItemStack> through the bukkit service manager.
 
 ```java
 public class TachyonCookies extends JavaPlugin {
 
-    private TachyonAPI tachyon;
+    private TachyonAPI<ItemStack> tachyon;
 
     @Override
     public void onEnable() {
@@ -73,7 +76,29 @@ public class TachyonCookies extends JavaPlugin {
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
-        tachyon.registerComponent(CookieComponent.getDefaultInstance());
+
+        tachyon.getComponentRegistry().registerComponent(CookieComponent.getDefaultInstance(), new ComponentPreviewHandler<>() {
+
+            //Used inside gui /snapshot list to differentiate components inside a full snapshot
+            @Override
+            public ItemStack buildComponentIcon() {
+                return new ItemStack(Material.COOKIE);
+            }
+
+            //Used to say how to represent the datas inside the snapshot gui
+            @Override
+            public <C extends Message> ItemStack[] buildComponentDataDisplay(C message) {
+                CookieComponent cookieComponent = (CookieComponent) message;
+
+                //You can use an ItemBuilder for better readability.
+                ItemStack itemStack = new ItemStack(Material.COOKIE);
+                ItemMeta meta = itemStack.getItemMeta();
+                meta.setDisplayName(" Amount of Cookie: " + cookieComponent.getCookies());
+                itemStack.setItemMeta(meta);
+
+                return new ItemStack[]{itemStack};
+            }
+        });
         getCommand("cookie").setExecutor(new CookieCommand(this));
         getLogger().info("Cookie Clicker loaded !");
     }
@@ -86,7 +111,7 @@ public class TachyonCookies extends JavaPlugin {
         return tachyon != null;
     }
 
-    public TachyonAPI getTachyon() {
+    public TachyonAPI<ItemStack> getTachyon() {
         return tachyon;
     }
 }
@@ -98,10 +123,10 @@ You can retrieve a player's profile and read/write their components with ease.
 ```java
 public class CookieCommand implements CommandExecutor {
 
-    private final TachyonCookies plugin;
+    private final TachyonAPI<ItemStack> tachyon;
 
     public CookieCommand(TachyonCookies plugin) {
-        this.plugin = plugin;
+        this.tachyon = plugin.getTachyon();
     }
 
     @Override
@@ -111,7 +136,8 @@ public class CookieCommand implements CommandExecutor {
             return true;
         }
 
-        TachyonProfile profile = plugin.getTachyon().getProfile(player.getUniqueId());
+        final UUID playerId = player.getUniqueId();
+        final TachyonProfile profile = tachyon.getProfile(playerId);
         if (profile == null) {
             player.sendMessage("§cError: Your profile is not loaded from Tachyon yet.");
             return true;
@@ -124,10 +150,9 @@ public class CookieCommand implements CommandExecutor {
             long newCookiesAmount = component.getCookies() + 1;
 
             //Update the component
-            profile.updateComponent(CookieComponent.class, (CookieComponent.Builder builder) -> {
-                builder.setCookies(newCookiesAmount);
-            });
+            profile.updateComponent(CookieComponent.class, (CookieComponent.Builder builder) -> builder.setCookies(newCookiesAmount));
 
+            tachyon.getAuditService().log(playerId.toString(), "GAIN_COOKIES", "+1");
             player.sendMessage("§6+1 Cookie ! §e(Total : " + newCookiesAmount + ")");
             return true;
         }

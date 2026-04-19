@@ -1,10 +1,10 @@
 package tech.skworks.tachyon.plugin.internal.util;
 
-import tech.skworks.tachyon.libs.grpc.StatusRuntimeException;
-import tech.skworks.tachyon.plugin.internal.grpc.GrpcClientManager;
+import org.jetbrains.annotations.Nullable;
+import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
+import tech.skworks.tachyon.plugin.internal.GrpcClientManager;
 import tech.skworks.tachyon.plugin.internal.metric.scraper.TachyonMetrics;
 
-import javax.annotation.Nullable;
 
 /**
  * Project Tachyon

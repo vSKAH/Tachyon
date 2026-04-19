@@ -13,16 +13,17 @@ import io.smallrye.config.WithDefault;
  */
 @ConfigMapping(prefix = "tachyon.snapshot")
 public interface SnapshotConfig {
-    String playersCollection();
-    String snapshotsCollection();
 
-    @WithDefault("tachyon")
-    String s3Bucket();
+    @WithDefault("snapshots") String collection();
 
-    @WithDefault("7")
-    int retentionDays();
-    @WithDefault("10")
-    int maxConcurrentUploads();
-    @WithDefault("300")
-    int throttleSeconds();
+    @WithDefault("tachyon:snapshot_stream") String streamKey();
+    @WithDefault("tachyon:snapshot_group") String streamGroupName();
+    @WithDefault("tachyon:snapshot_worker_1") String consumerId();
+
+
+    @WithDefault("tachyon") String s3Bucket();
+
+    @WithDefault("7") int retentionDays();
+    @WithDefault("10") int maxConcurrentUploads();
+    @WithDefault("300") int throttleSeconds();
 }

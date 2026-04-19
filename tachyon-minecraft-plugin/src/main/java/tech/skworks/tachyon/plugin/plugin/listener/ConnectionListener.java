@@ -1,6 +1,5 @@
-package tech.skworks.tachyon.plugin.internal.player.component;
+package tech.skworks.tachyon.plugin.plugin.listener;
 
-import org.apache.logging.log4j.Level;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -9,15 +8,12 @@ import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
-import tech.skworks.tachyon.contracts.common.StandardResponse;
-import tech.skworks.tachyon.contracts.player.PlayerRequest;
 import tech.skworks.tachyon.contracts.player.PlayerResponse;
-import tech.skworks.tachyon.plugin.TachyonCore;
-import tech.skworks.tachyon.plugin.internal.audit.AuditManager;
-import tech.skworks.tachyon.plugin.internal.grpc.GrpcClientManager;
-import tech.skworks.tachyon.plugin.internal.player.PlayerProfile;
+import tech.skworks.tachyon.plugin.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.internal.audit.GrpcAuditService;
 import tech.skworks.tachyon.plugin.internal.player.ProfileManager;
-import tech.skworks.tachyon.plugin.internal.player.profile.PlayerProfileService;
+import tech.skworks.tachyon.plugin.internal.player.component.ComponentService;
+import tech.skworks.tachyon.plugin.internal.player.heartbeat.HeartBeatService;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 
 import java.util.UUID;
@@ -32,18 +28,16 @@ import java.util.UUID;
  */
 public class ConnectionListener implements Listener {
     private final ProfileManager profileManager;
-    private final AuditManager audit;
+    private final GrpcAuditService audit;
     private final ComponentService componentService;
-    private final GrpcClientManager grpcClientManager;
-    private final PlayerProfileService playerProfileService;
+    private final HeartBeatService heartBeatService;
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("ConnectionListener");
 
-    public ConnectionListener(ProfileManager profileManager, PlayerProfileService profileService, AuditManager audit, ComponentService componentService, GrpcClientManager grpcClientManager) {
+    public ConnectionListener(ProfileManager profileManager, HeartBeatService profileService, GrpcAuditService audit, ComponentService componentService) {
         this.profileManager = profileManager;
         this.audit = audit;
         this.componentService = componentService;
-        this.grpcClientManager = grpcClientManager;
-        this.playerProfileService = profileService;
+        this.heartBeatService = profileService;
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
@@ -66,7 +60,8 @@ public class ConnectionListener implements Listener {
             audit.log(uuid.toString(), "JOIN", "Player joined server");
             LOGGER.info("Pre-login successful for {} ({}).", event.getName(), uuid);
 
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             LOGGER.error(e, "Unexpected error during pre-login for {} ({})", event.getName(), uuid);
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, "§c[Tachyon] An internal error occurred. Please reconnect.");
         }
@@ -75,22 +70,16 @@ public class ConnectionListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
     public void onLogin(PlayerLoginEvent event) {
         if (event.getResult() != PlayerLoginEvent.Result.ALLOWED) {
-            UUID uuid = event.getPlayer().getUniqueId();
+            final Player player = event.getPlayer();
+            final UUID uuid = player.getUniqueId();
+            final String name = player.getName();
 
             if (profileManager.isLoaded(uuid)) {
                 LOGGER.warn("Login denied for {} after profile was loaded (result: {}) — releasing state and unloading profile.", uuid, event.getResult());
                 audit.log(uuid.toString(), "KICKED", "Login denied: " + event.getKickMessage());
 
-                try {
-                    StandardResponse freeResp = grpcClientManager.getPlayerStub(3).freePlayer(PlayerRequest.newBuilder().setUuid(uuid.toString()).build());
-                    if (!freeResp.getSuccess()) {
-                        LOGGER.warn("freePlayer() returned success=false for {} — state may expire via TTL.", uuid);
-                    }
-                } catch (Exception e) {
-                    LOGGER.log(Level.WARN, e, "freePlayer() call failed for {} — state will expire via TTL (30s).", uuid);
-                }
-
                 profileManager.unloadPlayer(uuid);
+                heartBeatService.unlockPlayerProfile(uuid, name);
             }
         }
     }
@@ -120,8 +109,7 @@ public class ConnectionListener implements Listener {
 
             componentService.flushQueueForPlayer(uuid);
             profileManager.unloadPlayer(uuid);
-
-            playerProfileService.unlockPlayerProfile(uuid, player.getName());
+            heartBeatService.unlockPlayerProfile(uuid, player.getName());
         });
     }
 

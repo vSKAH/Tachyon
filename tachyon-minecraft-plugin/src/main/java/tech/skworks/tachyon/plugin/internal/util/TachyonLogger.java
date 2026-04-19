@@ -19,10 +19,6 @@ public class TachyonLogger {
     private final Logger log;
     private final String prefix;
 
-    /**
-     * @param pluginName Le nom principal du plugin (ex: "Tachyon")
-     * @param moduleName Le nom du module (ex: "AuditManager")
-     */
     public TachyonLogger(String pluginName, String moduleName) {
         this.log = LogManager.getLogger(pluginName);
         this.prefix = "[" + moduleName + "] ";

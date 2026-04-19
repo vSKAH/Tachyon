@@ -1,11 +1,10 @@
 package tech.skworks.tachyon.plugin.internal.player;
 
-import tech.skworks.tachyon.api.profile.TachyonProfile;
-import tech.skworks.tachyon.libs.protobuf.Message;
 import tech.skworks.tachyon.contracts.player.PlayerResponse;
-import tech.skworks.tachyon.libs.protobuf.Any;
-import tech.skworks.tachyon.plugin.TachyonCore;
-import tech.skworks.tachyon.plugin.internal.player.component.ComponentRegistry;
+import tech.skworks.tachyon.libs.com.google.protobuf.Any;
+import tech.skworks.tachyon.libs.com.google.protobuf.Message;
+import tech.skworks.tachyon.plugin.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.internal.player.component.ComponentRegistryImpl;
 import tech.skworks.tachyon.plugin.internal.player.component.ComponentService;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.internal.metric.scraper.TachyonMetrics;
@@ -28,20 +27,20 @@ public class ProfileManager {
 
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("ProfileManager");
 
-    private final Map<UUID, PlayerProfile> profiles = new ConcurrentHashMap<>();
+    private final Map<UUID, GrpcTachyonProfile> profiles = new ConcurrentHashMap<>();
     private final ComponentService componentService;
-    private final ComponentRegistry componentRegistry;
+    private final ComponentRegistryImpl componentRegistryImpl;
 
     @Nullable
     private final TachyonMetrics tachyonMetrics;
 
-    public ProfileManager(ComponentService componentService, ComponentRegistry componentRegistry, @Nullable TachyonMetrics tachyonMetrics) {
+    public ProfileManager(ComponentService componentService, ComponentRegistryImpl componentRegistryImpl, @Nullable TachyonMetrics tachyonMetrics) {
         this.componentService = componentService;
-        this.componentRegistry = componentRegistry;
+        this.componentRegistryImpl = componentRegistryImpl;
         this.tachyonMetrics = tachyonMetrics;
     }
 
-    private void add(PlayerProfile profile) {
+    private void add(GrpcTachyonProfile profile) {
         if (profile == null) return;
         this.profiles.put(profile.getUuid(), profile);
     }
@@ -50,11 +49,11 @@ public class ProfileManager {
         this.profiles.remove(uuid);
     }
 
-    public @Nullable PlayerProfile get(UUID uuid) {
+    public @Nullable GrpcTachyonProfile get(UUID uuid) {
         return this.profiles.get(uuid);
     }
 
-    public Collection<PlayerProfile> getAll() {
+    public Collection<GrpcTachyonProfile> getAll() {
         return this.profiles.values();
     }
 
@@ -62,15 +61,14 @@ public class ProfileManager {
         return this.profiles.containsKey(uuid);
     }
 
-
     public void load(PlayerResponse playerResponse, UUID uuid) {
-        PlayerProfile profile = new PlayerProfile(uuid, componentService);
+        GrpcTachyonProfile profile = new GrpcTachyonProfile(uuid, componentService);
 
         int loaded  = 0;
         int skipped = 0;
 
         for (Any any : playerResponse.getComponentsList()) {
-            Message message = componentRegistry.unpack(any);
+            Message message = componentRegistryImpl.unpack(any);
 
             if (message != null) {
                 profile.initComponent(message);

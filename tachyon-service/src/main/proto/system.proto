@@ -15,5 +15,4 @@ message PingRequest {
 
 message PingResponse {
   int64 server_time = 1;
-  string message = 2;
 }

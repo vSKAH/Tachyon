@@ -26,24 +26,25 @@ import java.util.ArrayList;
 class PlayerStartup {
 
     @Inject
-    PlayerConfig config;
+    PlayerConfig playerConfig;
     @Inject
     Logger log;
+
     @Inject
     RedisDataSource redisDS;
 
     @Inject
     MongoClient mongo;
-    @ConfigProperty(name = "tachyon.database.name")
+    @ConfigProperty(name = "quarkus.mongodb.database")
     String mongoDatabase;
 
     void onStart(@Observes StartupEvent ev) {
         try {
-            redisDS.stream(String.class).xgroupCreate(config.streamKey(), "tachyon_workers", "0", new XGroupCreateArgs().mkstream());
-            log.info("Redis Stream [" + config.streamKey() + "] initialized successfully.");
+            redisDS.stream(String.class).xgroupCreate(playerConfig.streamKey(), playerConfig.streamGroupName(), "0", new XGroupCreateArgs().mkstream());
+            log.infof("Redis Stream [%s] initialized successfully.", playerConfig.streamKey());
         } catch (Exception e) {
             if (e.getMessage() != null && e.getMessage().contains("BUSYGROUP")) {
-                log.debug("Redis Stream [" + config.streamKey() + "] already exists!");
+                log.debugf("Redis Stream [%s] already exists!", playerConfig.streamKey());
             } else {
                 throw new RuntimeException("Unable to init the Redis Stream for player", e);
             }
@@ -51,10 +52,10 @@ class PlayerStartup {
 
         MongoDatabase database = mongo.getDatabase(mongoDatabase);
 
-        boolean exists = database.listCollectionNames().into(new ArrayList<>()).contains(config.collection());
+        boolean exists = database.listCollectionNames().into(new ArrayList<>()).contains(playerConfig.collection());
         if (!exists) {
-            database.createCollection(config.collection());
-            database.getCollection(config.collection()).createIndex(Indexes.ascending("uuid"), new IndexOptions().unique(true));
+            database.createCollection(playerConfig.collection());
+            database.getCollection(playerConfig.collection()).createIndex(Indexes.ascending("uuid"), new IndexOptions().unique(true));
         }
         log.info("MongoDB indexes for Player module verified/created.");
     }

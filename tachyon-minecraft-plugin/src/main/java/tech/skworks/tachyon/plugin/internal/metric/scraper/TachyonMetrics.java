@@ -4,9 +4,10 @@ import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
 import io.prometheus.client.Histogram;
 import org.bukkit.Bukkit;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
-import tech.skworks.tachyon.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.plugin.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 
 import java.io.File;
@@ -22,7 +23,7 @@ import java.io.File;
 public class TachyonMetrics {
 
     private final String serverName;
-    private final org.bukkit.plugin.Plugin plugin;
+    private final Plugin plugin;
     private BukkitTask metricsTask;
 
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("TachyonMetrics");

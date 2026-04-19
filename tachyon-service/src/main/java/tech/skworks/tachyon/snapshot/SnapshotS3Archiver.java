@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @since 1.0.0-SNAPSHOT
  */
 @ApplicationScoped
-public class SnapshotS3Janitor {
+public class SnapshotS3Archiver {
 
     @Inject
     Logger log;
@@ -46,24 +46,24 @@ public class SnapshotS3Janitor {
     @Inject
     SnapshotConfig config;
 
-    @ConfigProperty(name = "tachyon.database.name")
+    @ConfigProperty(name = "quarkus.mongodb.database")
     String dbName;
 
     private ValueCommands<String, String> redisString;
     private MongoCollection<Document> snapshotCollection;
 
-    public SnapshotS3Janitor(RedisDataSource redisDS) {
+    public SnapshotS3Archiver(RedisDataSource redisDS) {
         this.redisString = redisDS.value(String.class);
     }
 
     @PostConstruct
     void init() {
-        this.snapshotCollection = mongo.getDatabase(dbName).getCollection(config.snapshotsCollection());
-        this.log.debug("MongoDB collections initialized for SnapshotS3Janitor.");
+        this.snapshotCollection = mongo.getDatabase(dbName).getCollection(config.collection());
+        this.log.debug("MongoDB collections initialized for SnapshotS3Archiver.");
     }
 
     private boolean isOffPeak() {
-        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Europe/Paris"));
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.systemDefault());
         int hour = now.getHour();
         DayOfWeek day = now.getDayOfWeek();
 
@@ -71,19 +71,19 @@ public class SnapshotS3Janitor {
         return hour >= 14 && hour < 17 && day != DayOfWeek.SATURDAY && day != DayOfWeek.SUNDAY;
     }
 
-    @Scheduled(cron = "0 0 * * * ?", delay = 3L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    @Scheduled(cron = "0 0 * * * ?", delay = 10L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void executeArchivingJob() {
         if (!isOffPeak()) return;
 
-        String lockKey = "tachyon:job:s3_janitor:lock";
+        final String lockKey = "tachyon:job:s3_archiver:lock";
         boolean lockAcquired = redisString.setAndChanged(lockKey, "running", new SetArgs().nx().ex(7200));
 
         if (!lockAcquired) {
-            log.info("[S3Janitor] Already running on another instance — skipped.");
+            log.info("[S3Archiver] Already running on another instance — skipped.");
             return;
         }
 
-        log.infof("[S3Janitor] Starting — archiving snapshots older than %d day(s)...", config.retentionDays());
+        log.infof("[S3Archiver] Starting — archiving snapshots older than %d day(s)...", config.retentionDays());
 
         long cutoffTimestamp = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(config.retentionDays());
 
@@ -102,7 +102,7 @@ public class SnapshotS3Janitor {
                     String key = "snapshots/" + uuid + "/" + snapId + ".json";
 
                     uploadThrottle.acquire();
-                    log.debugf("[S3Janitor] Uploading snapshot %s for player %s (%d bytes)...", snapId, uuid, data.length);
+                    log.debugf("[S3Archiver] Uploading snapshot %s for player %s (%d bytes)...", snapId, uuid, data.length);
 
                     try {
                         PutObjectRequest putReq = PutObjectRequest.builder().bucket(config.s3Bucket()).key(key).build();
@@ -110,7 +110,7 @@ public class SnapshotS3Janitor {
                         s3.putObject(putReq, AsyncRequestBody.fromBytes(data)).whenCompleteAsync((res, err) -> {
                             try {
                                 if (err != null) {
-                                    log.errorf(err, "[S3Janitor] Upload failed for snapshot %s (player %s).", snapId, uuid);
+                                    log.errorf(err, "[S3Archiver] Upload failed for snapshot %s (player %s).", snapId, uuid);
                                     failCount.incrementAndGet();
                                     return;
                                 }
@@ -118,9 +118,9 @@ public class SnapshotS3Janitor {
                                 try {
                                     snapshotCollection.deleteOne(Filters.eq("_id", snapshot.getObjectId("_id")));
                                     successCount.incrementAndGet();
-                                    log.debugf("[S3Janitor] Snapshot %s archived and deleted (player %s).", snapId, uuid);
+                                    log.debugf("[S3Archiver] Snapshot %s archived and deleted (player %s).", snapId, uuid);
                                 } catch (Exception deleteEx) {
-                                    log.errorf(deleteEx, "[S3Janitor] Upload succeeded but MongoDB delete failed for %s", snapId);
+                                    log.errorf(deleteEx, "[S3Archiver] Upload succeeded but MongoDB delete failed for %s", snapId);
                                     failCount.incrementAndGet();
                                 }
                             } finally {
@@ -130,21 +130,21 @@ public class SnapshotS3Janitor {
 
                     } catch (Exception syncEx) {
                         uploadThrottle.release();
-                        log.errorf(syncEx, "[S3Janitor] Synchronous exception while launching S3 upload for %s", snapId);
+                        log.errorf(syncEx, "[S3Archiver] Synchronous exception while launching S3 upload for %s", snapId);
                         failCount.incrementAndGet();
                     }
                 }
             }
 
-            log.debugf("[S3Janitor] Waiting for %d in-flight upload(s) to complete...", config.maxConcurrentUploads() - uploadThrottle.availablePermits());
+            log.debugf("[S3Archiver] Waiting for %d in-flight upload(s) to complete...", config.maxConcurrentUploads() - uploadThrottle.availablePermits());
             uploadThrottle.acquireUninterruptibly(config.maxConcurrentUploads());
 
         } catch (Exception e) {
-            log.errorf(e, "[S3Janitor] Unexpected error — waiting for in-flight uploads before releasing lock.");
+            log.errorf(e, "[S3Archiver] Unexpected error — waiting for in-flight uploads before releasing lock.");
             uploadThrottle.acquireUninterruptibly(config.maxConcurrentUploads());
         } finally {
             redisString.getdel(lockKey);
-            log.infof("[S3Janitor] Finished. Success: %d | Failed: %d | Lock released.", successCount.get(), failCount.get());
+            log.infof("[S3Archiver] Finished. Success: %d | Failed: %d | Lock released.", successCount.get(), failCount.get());
         }
     }
 }

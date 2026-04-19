@@ -1,6 +1,7 @@
 package tech.skworks.tachyon.audit;
 
 import io.smallrye.config.ConfigMapping;
+import io.smallrye.config.WithDefault;
 
 /**
  * Project Tachyon
@@ -12,6 +13,10 @@ import io.smallrye.config.ConfigMapping;
  */
 @ConfigMapping(prefix = "tachyon.audit")
 public interface AuditConfig {
-    String streamKey();
-    String collection();
+    @WithDefault("audit_logs") String collection();
+
+    @WithDefault("tachyon:audit_stream") String streamKey();
+    @WithDefault("tachyon:audit_group") String streamGroupName();
+    @WithDefault("tachyon:audit_worker_1") String consumerId();
+
 }

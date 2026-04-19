@@ -91,32 +91,48 @@
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
                             <transformers>
-                                <transformer
-                                        implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
 
                             <relocations>
                                 <relocation>
-                                    <pattern>com.google.protobuf</pattern>
-                                    <shadedPattern>tech.skworks.tachyon.libs.protobuf</shadedPattern>
-                                </relocation>
-                                <relocation>
                                     <pattern>io.grpc</pattern>
-                                    <shadedPattern>tech.skworks.tachyon.libs.grpc</shadedPattern>
+                                    <shadedPattern>tech.skworks.tachyon.libs.io.grpc</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>com.google.common</pattern>
-                                    <shadedPattern>tech.skworks.tachyon.libs.guava</shadedPattern>
+                                    <pattern>com.google</pattern>
+                                    <shadedPattern>tech.skworks.tachyon.libs.com.google</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>com.google.gson</pattern>
-                                    <shadedPattern>tech.skworks.tachyon.libs.gson</shadedPattern>
+                                    <pattern>google</pattern>
+                                    <shadedPattern>tech.skworks.tachyon.libs.google</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>android.annotation</pattern>
+                                    <shadedPattern>tech.skworks.tachyon.libs.annotation.android</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>javax.annotation</pattern>
+                                    <shadedPattern>tech.skworks.tachyon.libs.annotation.javax</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.jspecify.annotations</pattern>
+                                    <shadedPattern>tech.skworks.tachyon.libs.annotation.jspecify</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>io.perfmark</pattern>
+                                    <shadedPattern>tech.skworks.tachyon.libs.io.perfmark</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.codehaus</pattern>
+                                    <shadedPattern>tech.skworks.tachyon.libs.org.codehaus</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
+
         </plugins>
     </build>
 
