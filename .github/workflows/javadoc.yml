@@ -33,7 +33,7 @@ jobs:
           cache: maven
 
       - name: Generate Javadoc with Maven
-        run: mvn clean javadoc:aggregate
+        run: mvn clean install javadoc:aggregate -Ddoclint=none
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v4
