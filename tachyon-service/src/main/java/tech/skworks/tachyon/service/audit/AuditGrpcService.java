@@ -10,8 +10,8 @@ import io.smallrye.common.annotation.NonBlocking;
 import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.service.contracts.audit.LogBatchRequest;
-import tech.skworks.tachyon.service.contracts.audit.LogRequest;
+import tech.skworks.tachyon.service.contracts.audit.LogEventBatchRequest;
+import tech.skworks.tachyon.service.contracts.audit.LogEventRequest;
 import tech.skworks.tachyon.service.contracts.audit.MutinyAuditServiceGrpc;
 
 import java.util.Map;
@@ -42,20 +42,20 @@ public class AuditGrpcService extends MutinyAuditServiceGrpc.AuditServiceImplBas
     }
 
     @Override
-    public Uni<Empty> logEventBatch(LogBatchRequest req) {
-        if (req.getLogsCount() == 0) {
+    public Uni<Empty> logEventBatch(LogEventBatchRequest req) {
+        if (req.getEntriesCount() == 0) {
             return Uni.createFrom().item(Empty.getDefaultInstance());
         }
 
         return redisStream.xadd(auditConfig.streamKey(), STREAM_ARGS, Map.of("payload", req.toByteArray()))
-                .invoke(_ -> log.debugf("[AuditGrpcService] %d Audit log enqueued", req.getLogsCount()))
+                .invoke(_ -> log.debugf("[AuditGrpcService] %d Audit log enqueued", req.getEntriesCount()))
                 .replaceWith(Empty.getDefaultInstance())
-                .onFailure().invoke((e) -> log.errorf(e, "[AuditGrpcService] Failed to enqueue %d audit logs", req.getLogsCount()))
+                .onFailure().invoke((e) -> log.errorf(e, "[AuditGrpcService] Failed to enqueue %d audit logs", req.getEntriesCount()))
                 .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Unable to enqueue log(s) to Redis").asRuntimeException());
     }
 
     @Override
-    public Uni<Empty> logEvent(LogRequest req) {
-        return logEventBatch(LogBatchRequest.newBuilder().addLogs(req).build());
+    public Uni<Empty> logEvent(LogEventRequest req) {
+        return logEventBatch(LogEventBatchRequest.newBuilder().addEntries(req.getEntry()).build());
     }
 }

@@ -7,11 +7,11 @@ option java_multiple_files = true;
 option java_package = "tech.skworks.tachyon.service.contracts.audit";
 
 service AuditService {
-  rpc LogEvent (LogRequest) returns (google.protobuf.Empty);
-  rpc LogEventBatch (LogBatchRequest) returns (google.protobuf.Empty);
+  rpc LogEvent (LogEventRequest) returns (google.protobuf.Empty);
+  rpc LogEventBatch (LogEventBatchRequest) returns (google.protobuf.Empty);
 }
 
-message LogRequest {
+message AuditLogEntry {
   string uuid = 1;
   string module = 2;
   string action = 3;
@@ -19,6 +19,10 @@ message LogRequest {
   int64 timestamp_ms = 5;
 }
 
-message LogBatchRequest {
-  repeated LogRequest logs = 1;
+message LogEventRequest {
+  AuditLogEntry entry = 1;
+}
+
+message LogEventBatchRequest {
+  repeated AuditLogEntry entries = 1;
 }

@@ -13,8 +13,8 @@ import jakarta.inject.Inject;
 import org.bson.Document;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.service.contracts.audit.LogBatchRequest;
-import tech.skworks.tachyon.service.contracts.audit.LogRequest;
+import tech.skworks.tachyon.service.contracts.audit.AuditLogEntry;
+import tech.skworks.tachyon.service.contracts.audit.LogEventBatchRequest;
 
 import java.util.ArrayList;
 import java.util.Date;
@@ -69,9 +69,9 @@ class AuditStreamWorker {
 
             for (StreamMessage<String, String, byte[]> msg : messages) {
                 try {
-                    LogBatchRequest batch = LogBatchRequest.parseFrom(msg.payload().get("payload"));
+                    LogEventBatchRequest batch = LogEventBatchRequest.parseFrom(msg.payload().get("payload"));
 
-                    for (LogRequest logItem : batch.getLogsList()) {
+                    for (AuditLogEntry logItem : batch.getEntriesList()) {
                         docsToInsert.add(new Document("uuid", logItem.getUuid()).append("module", logItem.getModule()).append("action", logItem.getAction()).append("details", logItem.getDetails()).append("timestamp", new Date(logItem.getTimestampMs())));
                     }
                     idsToAck.add(msg.id());

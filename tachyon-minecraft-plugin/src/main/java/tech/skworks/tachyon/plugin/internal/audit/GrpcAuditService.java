@@ -3,8 +3,7 @@ package tech.skworks.tachyon.plugin.internal.audit;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.services.AuditService;
-import tech.skworks.tachyon.service.contracts.audit.LogBatchRequest;
-import tech.skworks.tachyon.service.contracts.audit.LogRequest;
+import tech.skworks.tachyon.service.contracts.audit.*;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.internal.GrpcClientManager;
@@ -27,7 +26,7 @@ public class GrpcAuditService implements AuditService {
     private final GrpcClientManager grpcClientManager;
     private final String serverName;
 
-    private final BlockingQueue<LogRequest> buffer = new LinkedBlockingQueue<>(50000);
+    private final BlockingQueue<AuditLogEntry> buffer = new LinkedBlockingQueue<>(50000);
 
     private final ScheduledExecutorService scheduler;
     private final ExecutorService flushExecutor;
@@ -48,13 +47,8 @@ public class GrpcAuditService implements AuditService {
      */
     @Override
     public void log(@NotNull final String uuid, @NotNull final String action, @NotNull final String details) {
-        LogRequest entry = LogRequest.newBuilder()
-                .setUuid(uuid)
-                .setModule(serverName)
-                .setAction(action)
-                .setDetails(details)
-                .setTimestampMs(System.currentTimeMillis())
-                .build();
+        final AuditLogEntry entry = AuditLogEntry.newBuilder().setUuid(uuid).setModule(serverName).setAction(action)
+                .setDetails(details).setTimestampMs(System.currentTimeMillis()).build();
 
         boolean accepted = buffer.offer(entry);
         if (!accepted) {
@@ -73,22 +67,22 @@ public class GrpcAuditService implements AuditService {
     private void flush() {
         if (buffer.isEmpty()) return;
 
-        List<LogRequest> batch = new ArrayList<>();
+        List<AuditLogEntry> batch = new ArrayList<>();
         buffer.drainTo(batch, 400);
         if (batch.isEmpty()) return;
 
         try {
-            grpcClientManager.getAuditStub(1).logEventBatch(LogBatchRequest.newBuilder().addAllLogs(batch).build());
+            grpcClientManager.getAuditStub(1).logEventBatch(LogEventBatchRequest.newBuilder().addAllEntries(batch).build());
         } catch (Exception e) {
             LOGGER.log(Level.WARN, e, "gRPC call to audit service failed — requeueing {} entries.", batch.size());
             requeue(batch);
         }
     }
 
-    private void requeue(List<LogRequest> batch) {
+    private void requeue(List<AuditLogEntry> batch) {
         int requeued = 0;
         int dropped  = 0;
-        for (LogRequest entry : batch) {
+        for (AuditLogEntry entry : batch) {
             if (buffer.offer(entry)) requeued++;
             else dropped++;
         }
