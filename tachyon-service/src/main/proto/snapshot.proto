@@ -12,7 +12,7 @@ option java_package = "tech.skworks.tachyon.service.contracts.snapshot";
 service SnapshotService {
   rpc TakeDatabaseSnapshot (TakeDatabaseSnapshotRequest) returns (google.protobuf.Empty);
   rpc TakeComponentSnapshot (TakeComponentSnapshotRequest) returns (google.protobuf.Empty);
-  rpc RevertToSnapshot (RevertToSnapshotRequest) returns (tech.skworks.tachyon.service.contracts.player.PlayerResponse);
+  rpc RevertToSnapshot (RevertToSnapshotRequest) returns (tech.skworks.tachyon.service.contracts.player.GetPlayerResponse);
   rpc ListSnapshots (ListSnapshotsRequest) returns (ListSnapshotsResponse);
   rpc DecodeSnapshot (DecodeSnapshotRequest) returns (DecodeSnapshotResponse);
 }

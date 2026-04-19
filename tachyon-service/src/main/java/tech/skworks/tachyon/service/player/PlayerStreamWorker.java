@@ -23,7 +23,7 @@ import org.bson.Document;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import tech.skworks.tachyon.service.contracts.player.DeleteComponentRequest;
-import tech.skworks.tachyon.service.contracts.player.PlayerResponse;
+import tech.skworks.tachyon.service.contracts.player.GetPlayerResponse;
 import tech.skworks.tachyon.service.contracts.player.SaveComponentRequest;
 import tech.skworks.tachyon.service.contracts.player.SaveProfileRequest;
 import tech.skworks.tachyon.service.infra.DynamicProtobufRegistry;
@@ -239,7 +239,7 @@ class PlayerStreamWorker {
                 return;
             }
 
-            PlayerResponse.Builder res = PlayerResponse.newBuilder().setUuid(uuid);
+            GetPlayerResponse.Builder response = GetPlayerResponse.newBuilder().setUuid(uuid);
             int cacheHits = 0;
             int cacheMisses = 0;
 
@@ -260,7 +260,7 @@ class PlayerStreamWorker {
 
                     Any any = buildAnyFromJson(shortType, compForJson.toJson());
                     if (any != null) {
-                        res.addComponents(any);
+                        response.addComponents(any);
                         cacheHits++;
                     } else {
                         log.warnf("[PlayerStreamWorker] Unknown type '%s' for player %s — is the .desc loaded?", shortType, uuid);
@@ -268,7 +268,7 @@ class PlayerStreamWorker {
                     }
                 }
             }
-            byte[] cacheBytes = res.build().toByteArray();
+            byte[] cacheBytes = response.build().toByteArray();
             redisBytes.setex("player:cache:" + uuid, 60, cacheBytes);
             log.infof("[PlayerStreamWorker] Cache updated for %s — %d component(s) cached, %d skipped (%d bytes).", uuid, cacheHits, cacheMisses, cacheBytes.length);
         } catch (Exception e) {

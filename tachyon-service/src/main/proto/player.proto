@@ -9,22 +9,22 @@ option java_package = "tech.skworks.tachyon.service.contracts.player";
 
 
 service PlayerDataService {
-  rpc GetPlayer             (PlayerRequest)          returns (PlayerResponse);
-  rpc SaveComponent         (SaveComponentRequest)   returns (google.protobuf.Empty);
-  rpc SaveProfile           (SaveProfileRequest)     returns (google.protobuf.Empty);
-  rpc DeleteComponent       (DeleteComponentRequest) returns (google.protobuf.Empty);
-  rpc PlayerHeartBeat       (PlayerRequest)          returns (google.protobuf.Empty);
-  rpc PlayerHeartBeatBatch  (HeartBeatBatchRequest)  returns (google.protobuf.Empty);
-  rpc FreePlayer            (PlayerRequest)          returns (google.protobuf.Empty);
+  rpc GetPlayer             (GetPlayerRequest)            returns (GetPlayerResponse);
+  rpc SaveComponent         (SaveComponentRequest)        returns (google.protobuf.Empty);
+  rpc SaveProfile           (SaveProfileRequest)          returns (google.protobuf.Empty);
+  rpc DeleteComponent       (DeleteComponentRequest)      returns (google.protobuf.Empty);
+  rpc PlayerHeartBeat       (PlayerHeartBeatRequest)      returns (google.protobuf.Empty);
+  rpc PlayerHeartBeatBatch  (PlayerHeartBeatBatchRequest) returns (google.protobuf.Empty);
+  rpc FreePlayer            (FreePlayerRequest)           returns (google.protobuf.Empty);
 }
 
-message PlayerRequest {
+message GetPlayerRequest {
   string uuid = 1;
 }
 
-message PlayerResponse {
+message GetPlayerResponse {
   string uuid = 1;
-  repeated google.protobuf.Any components = 5;
+  repeated google.protobuf.Any components = 2;
 }
 
 message SaveComponentRequest {
@@ -42,6 +42,14 @@ message SaveProfileRequest {
   repeated google.protobuf.Any components = 2;
 }
 
-message HeartBeatBatchRequest {
-  repeated PlayerRequest beat = 1;
+message PlayerHeartBeatRequest {
+  string uuid = 1;
+}
+
+message PlayerHeartBeatBatchRequest {
+  repeated string uuids = 1;
+}
+
+message FreePlayerRequest {
+  string uuid = 1;
 }

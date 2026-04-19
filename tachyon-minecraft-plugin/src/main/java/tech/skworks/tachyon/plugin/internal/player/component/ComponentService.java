@@ -50,14 +50,14 @@ public class ComponentService extends AbstractGrpcService {
     }
 
     @Nullable
-    public PlayerResponse loadProfile(UUID uuid) {
+    public GetPlayerResponse loadProfile(UUID uuid) {
         int attempts = 0;
-        PlayerResponse playerResponse = null;
+        GetPlayerResponse playerResponse = null;
         try (var _ = startTimer("GetPlayer")) {
             while (playerResponse == null && attempts < 6) {
                 attempts++;
                 try {
-                    playerResponse = grpcClientManager.getPlayerStub(4).getPlayer(PlayerRequest.newBuilder().setUuid(uuid.toString()).build());
+                    playerResponse = grpcClientManager.getPlayerStub(4).getPlayer(GetPlayerRequest.newBuilder().setUuid(uuid.toString()).build());
                 } catch (StatusRuntimeException e) {
                     Status status = e.getStatus();
                     if (status.getCode() == Status.Code.CANCELLED) {

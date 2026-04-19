@@ -27,7 +27,7 @@ import org.bson.types.Binary;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.service.contracts.player.PlayerResponse;
+import tech.skworks.tachyon.service.contracts.player.GetPlayerResponse;
 import tech.skworks.tachyon.service.contracts.snapshot.*;
 import tech.skworks.tachyon.service.infra.DynamicProtobufRegistry;
 
@@ -278,7 +278,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
     }
 
     @Override
-    public Uni<PlayerResponse> revertToSnapshot(RevertToSnapshotRequest request) {
+    public Uni<GetPlayerResponse> revertToSnapshot(RevertToSnapshotRequest request) {
         return super.revertToSnapshot(request);
     }
 }

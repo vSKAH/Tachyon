@@ -8,13 +8,13 @@ import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
-import tech.skworks.tachyon.service.contracts.player.PlayerResponse;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.audit.GrpcAuditService;
 import tech.skworks.tachyon.plugin.internal.player.ProfileManager;
 import tech.skworks.tachyon.plugin.internal.player.component.ComponentService;
 import tech.skworks.tachyon.plugin.internal.player.heartbeat.HeartBeatService;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
+import tech.skworks.tachyon.service.contracts.player.GetPlayerResponse;
 
 import java.util.UUID;
 
@@ -48,7 +48,7 @@ public class ConnectionListener implements Listener {
         LOGGER.info("Processing pre-login for {} ({})", event.getName(), uuid);
 
         try {
-            PlayerResponse playerResponse = componentService.loadProfile(uuid);
+            GetPlayerResponse playerResponse = componentService.loadProfile(uuid);
 
             if (playerResponse == null) {
                 LOGGER.error("Profile load returned null for {} ({}) — kicking.", event.getName(), uuid);

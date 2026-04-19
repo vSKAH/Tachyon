@@ -81,8 +81,10 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
         this.playersCollection = mongoClient.getDatabase(dbName).getCollection(config.collection());
     }
 
+
+
     @Override
-    public Uni<PlayerResponse> getPlayer(PlayerRequest req) {
+    public Uni<GetPlayerResponse> getPlayer(GetPlayerRequest req) {
         final String uuid = req.getUuid();
         final String dirtyKey = "player:dirty:" + uuid;
         final String stateKey = "player:state:" + uuid;
@@ -199,7 +201,7 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
     }
 
     @Override
-    public Uni<Empty> freePlayer(PlayerRequest req) {
+    public Uni<Empty> freePlayer(FreePlayerRequest req) {
         final String uuid = req.getUuid();
         log.infof("[PlayerDataGrpcService] freePlayer() called for %s — releasing state.", uuid);
 
@@ -217,17 +219,17 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
 
 
     @Override
-    public Uni<Empty> playerHeartBeatBatch(HeartBeatBatchRequest req) {
-        if (req.getBeatCount() <= 0) return Uni.createFrom().item(Empty.getDefaultInstance());
+    public Uni<Empty> playerHeartBeatBatch(PlayerHeartBeatBatchRequest req) {
+        if (req.getUuidsCount() <= 0) return Uni.createFrom().item(Empty.getDefaultInstance());
 
-        log.debugf("[PlayerDataGrpcService] Heartbeat batch received — renewing TTL for %d player(s).", req.getBeatCount());
+        log.debugf("[PlayerDataGrpcService] Heartbeat batch received — renewing TTL for %d player(s).", req.getUuidsCount());
 
-        return Multi.createFrom().iterable(req.getBeatList())
-                .onItem().transformToUniAndMerge(beat ->
-                        redisKey.expire("player:state:" + beat.getUuid(), 30)
+        return Multi.createFrom().iterable(req.getUuidsList())
+                .onItem().transformToUniAndMerge(playerId ->
+                        redisKey.expire("player:state:" + playerId, 30)
                                 .invoke(exists -> {
                                     if (Boolean.FALSE.equals(exists)) {
-                                        log.debugf("[PlayerDataGrpcService] Heartbeat: state key missing for %s (may be already FREE).", beat.getUuid());
+                                        log.debugf("[PlayerDataGrpcService] Heartbeat: state key missing for %s (may be already FREE).", playerId);
                                     }
                                 })
                                 .onFailure().recoverWithItem(false)
@@ -239,18 +241,18 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
     }
 
     @Override
-    public Uni<Empty> playerHeartBeat(PlayerRequest req) {
-        return playerHeartBeatBatch(HeartBeatBatchRequest.newBuilder().addBeat(req).build());
+    public Uni<Empty> playerHeartBeat(PlayerHeartBeatRequest req) {
+        return playerHeartBeatBatch(PlayerHeartBeatBatchRequest.newBuilder().addUuids(req.getUuid()).build());
     }
 
 
-    private Uni<PlayerResponse> readFromMongo(String uuid) {
+    private Uni<GetPlayerResponse> readFromMongo(String uuid) {
         return playersCollection.find(Filters.eq("uuid", uuid)).collect().first()
                 .ifNoItem().after(Duration.ofSeconds(5)).failWith(() -> new MongoTimeoutException("MongoDB response timeout for " + uuid))
                 .onFailure(e -> e instanceof MongoSocketException || e instanceof MongoTimeoutException)
                 .retry().withBackOff(Duration.ofMillis(200)).atMost(2)
                 .onItem().transform(doc -> {
-                    PlayerResponse.Builder res = PlayerResponse.newBuilder().setUuid(uuid);
+                    GetPlayerResponse.Builder res = GetPlayerResponse.newBuilder().setUuid(uuid);
 
                     if (doc == null) {
                         log.infof("[PlayerDataGrpcService] No document found in MongoDB for %s — returning empty profile.", uuid);
@@ -299,10 +301,10 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
                 .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("MongoDB read failed!").asRuntimeException());
     }
 
-    private Uni<PlayerResponse> parseResponse(byte[] bytes) {
+    private Uni<GetPlayerResponse> parseResponse(byte[] bytes) {
         return Uni.createFrom().item(() -> {
             try {
-                return PlayerResponse.parseFrom(bytes);
+                return GetPlayerResponse.parseFrom(bytes);
             } catch (Exception e) {
                 throw new RuntimeException("Failed to parse cached PlayerResponse", e);
             }

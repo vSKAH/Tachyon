@@ -1,6 +1,6 @@
 package tech.skworks.tachyon.plugin.internal.player;
 
-import tech.skworks.tachyon.service.contracts.player.PlayerResponse;
+import tech.skworks.tachyon.service.contracts.player.GetPlayerResponse;
 import tech.skworks.tachyon.libs.com.google.protobuf.Any;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
@@ -61,7 +61,7 @@ public class ProfileManager {
         return this.profiles.containsKey(uuid);
     }
 
-    public void load(PlayerResponse playerResponse, UUID uuid) {
+    public void load(GetPlayerResponse playerResponse, UUID uuid) {
         GrpcTachyonProfile profile = new GrpcTachyonProfile(uuid, componentService);
 
         int loaded  = 0;
