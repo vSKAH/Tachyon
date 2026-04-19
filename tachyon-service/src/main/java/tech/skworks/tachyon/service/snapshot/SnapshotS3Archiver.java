@@ -4,6 +4,7 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Updates;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.value.SetArgs;
 import io.quarkus.redis.datasource.value.ValueCommands;
@@ -12,16 +13,17 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
-import org.bson.types.Binary;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import software.amazon.awssdk.core.async.AsyncRequestBody;
-import software.amazon.awssdk.services.s3.S3AsyncClient;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import java.time.DayOfWeek;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.Date;
+import java.util.UUID;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -42,7 +44,7 @@ public class SnapshotS3Archiver {
     @Inject
     MongoClient mongo;
     @Inject
-    S3AsyncClient s3;
+    S3Client s3;
     @Inject
     SnapshotConfig config;
 
@@ -76,7 +78,8 @@ public class SnapshotS3Archiver {
         if (!isOffPeak()) return;
 
         final String lockKey = "tachyon:job:s3_archiver:lock";
-        boolean lockAcquired = redisString.setAndChanged(lockKey, "running", new SetArgs().nx().ex(7200));
+        final String lockValue = UUID.randomUUID().toString();
+        boolean lockAcquired = redisString.setAndChanged(lockKey, lockValue, new SetArgs().nx().ex(7200));
 
         if (!lockAcquired) {
             log.info("[S3Archiver] Already running on another instance — skipped.");
@@ -92,47 +95,38 @@ public class SnapshotS3Archiver {
         AtomicInteger failCount = new AtomicInteger(0);
 
         try {
-            try (MongoCursor<Document> cursor = snapshotCollection.find(Filters.lt("timestamp", cutoffTimestamp)).batchSize(50).iterator()) {
+            try (MongoCursor<Document> cursor = snapshotCollection.find(Filters.and(Filters.lt("timestamp", cutoffTimestamp), Filters.exists("archived_at", false))).batchSize(50).iterator()) {
 
                 while (cursor.hasNext()) {
                     Document snapshot = cursor.next();
                     String uuid = snapshot.getString("uuid");
                     String snapId = snapshot.getObjectId("_id").toHexString();
-                    byte[] data = snapshot.get("data", Binary.class).getData();
                     String key = "snapshots/" + uuid + "/" + snapId + ".json";
 
                     uploadThrottle.acquire();
-                    log.debugf("[S3Archiver] Uploading snapshot %s for player %s (%d bytes)...", snapId, uuid, data.length);
 
-                    try {
-                        PutObjectRequest putReq = PutObjectRequest.builder().bucket(config.s3Bucket()).key(key).build();
+                    Thread.startVirtualThread(() -> {
+                        try {
+                            log.debugf("[S3Archiver] Uploading snapshot %s for player %s...", snapId, uuid);
 
-                        s3.putObject(putReq, AsyncRequestBody.fromBytes(data)).whenCompleteAsync((res, err) -> {
-                            try {
-                                if (err != null) {
-                                    log.errorf(err, "[S3Archiver] Upload failed for snapshot %s (player %s).", snapId, uuid);
-                                    failCount.incrementAndGet();
-                                    return;
-                                }
+                            PutObjectRequest putReq = PutObjectRequest.builder()
+                                    .bucket(config.s3Bucket())
+                                    .key(key)
+                                    .contentType("application/json")
+                                    .build();
 
-                                try {
-                                    snapshotCollection.deleteOne(Filters.eq("_id", snapshot.getObjectId("_id")));
-                                    successCount.incrementAndGet();
-                                    log.debugf("[S3Archiver] Snapshot %s archived and deleted (player %s).", snapId, uuid);
-                                } catch (Exception deleteEx) {
-                                    log.errorf(deleteEx, "[S3Archiver] Upload succeeded but MongoDB delete failed for %s", snapId);
-                                    failCount.incrementAndGet();
-                                }
-                            } finally {
-                                uploadThrottle.release();
-                            }
-                        });
+                            s3.putObject(putReq, RequestBody.fromString(snapshot.toJson()));
+                            snapshotCollection.updateOne(Filters.eq("_id", snapshot.getObjectId("_id")), Updates.set("archived_at", new Date()));
 
-                    } catch (Exception syncEx) {
-                        uploadThrottle.release();
-                        log.errorf(syncEx, "[S3Archiver] Synchronous exception while launching S3 upload for %s", snapId);
-                        failCount.incrementAndGet();
-                    }
+                            successCount.incrementAndGet();
+                            log.debugf("[S3Archiver] Snapshot %s has been marked as archived (player %s).", snapId, uuid);
+                        } catch (Exception ex) {
+                            log.errorf(ex, "[S3Archiver] Processing failed for snapshot %s (player %s).", snapId, uuid);
+                            failCount.incrementAndGet();
+                        } finally {
+                            uploadThrottle.release();
+                        }
+                    });
                 }
             }
 
@@ -143,7 +137,9 @@ public class SnapshotS3Archiver {
             log.errorf(e, "[S3Archiver] Unexpected error — waiting for in-flight uploads before releasing lock.");
             uploadThrottle.acquireUninterruptibly(config.maxConcurrentUploads());
         } finally {
-            redisString.getdel(lockKey);
+            if (lockValue.equals(redisString.get(lockKey))) {
+                redisString.getdel(lockKey);
+            }
             log.infof("[S3Archiver] Finished. Success: %d | Failed: %d | Lock released.", successCount.get(), failCount.get());
         }
     }
