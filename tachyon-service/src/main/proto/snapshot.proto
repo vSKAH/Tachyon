@@ -12,6 +12,7 @@ option java_package = "tech.skworks.tachyon.service.contracts.snapshot";
 service SnapshotService {
   rpc TakeDatabaseSnapshot (TakeDatabaseSnapshotRequest) returns (google.protobuf.Empty);
   rpc TakeComponentSnapshot (TakeComponentSnapshotRequest) returns (google.protobuf.Empty);
+  rpc ToggleLockSnapshot (ToggleLockSnapshotRequest) returns (ToggleLockSnapshotResponse);
   rpc RevertToSnapshot (RevertToSnapshotRequest) returns (tech.skworks.tachyon.service.contracts.player.GetPlayerResponse);
   rpc ListSnapshots (ListSnapshotsRequest) returns (ListSnapshotsResponse);
   rpc DecodeSnapshot (DecodeSnapshotRequest) returns (DecodeSnapshotResponse);
@@ -29,6 +30,15 @@ message TakeComponentSnapshotRequest {
   string reason = 3;
   string target_component = 4;
   bytes raw_data = 5;
+}
+
+message ToggleLockSnapshotRequest {
+  string snapshot_id = 1;
+  string locker_id = 2;
+}
+
+message ToggleLockSnapshotResponse {
+  bool lock_status = 1;
 }
 
 message RevertToSnapshotRequest {

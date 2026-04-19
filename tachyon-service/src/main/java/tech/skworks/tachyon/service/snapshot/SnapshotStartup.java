@@ -1,7 +1,10 @@
 package tech.skworks.tachyon.service.snapshot;
 
 import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.stream.XGroupCreateArgs;
@@ -9,10 +12,12 @@ import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
+import org.bson.Document;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Project Tachyon
@@ -56,7 +61,10 @@ public class SnapshotStartup {
         boolean exists = database.listCollectionNames().into(new ArrayList<>()).contains(snapshotConfig.collection());
         if (!exists) {
             database.createCollection(snapshotConfig.collection());
-            database.getCollection(snapshotConfig.collection()).createIndex(Indexes.compoundIndex(Indexes.ascending("uuid"), Indexes.descending("timestamp")));
+            MongoCollection<Document> snapshotCollection = database.getCollection(snapshotConfig.collection());
+            snapshotCollection.createIndex(Indexes.compoundIndex(Indexes.ascending("uuid"), Indexes.descending("timestamp")));
+            IndexOptions options = new IndexOptions().expireAfter(1L, TimeUnit.DAYS).partialFilterExpression(Filters.ne("locked", true));
+            snapshotCollection.createIndex(Indexes.ascending("archived_at"), options);
         }
         log.info("MongoDB indexes for Snapshot module verified/created.");
     }

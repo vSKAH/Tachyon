@@ -9,7 +9,9 @@ import com.google.protobuf.util.JsonFormat;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Projections;
 import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.Updates;
 import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.quarkus.grpc.GrpcService;
 import io.quarkus.mongodb.FindOptions;
 import io.quarkus.mongodb.reactive.ReactiveMongoClient;
@@ -23,6 +25,7 @@ import io.smallrye.mutiny.infrastructure.Infrastructure;
 import jakarta.annotation.PostConstruct;
 import jakarta.inject.Inject;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.bson.types.Binary;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -75,7 +78,56 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
         this.log.debug("SnapshotGrpcService collections initialized.");
     }
 
-   @Override
+    private Uni<ObjectId> parseObjectId(String snapshotId) {
+        try {
+            return Uni.createFrom().item(new ObjectId(snapshotId));
+        } catch (IllegalArgumentException e) {
+            log.errorf(e, "Invalid format for snapshot ID '%s'", snapshotId);
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withCause(e).withDescription("The provided Snapshot ID has an invalid format.").asRuntimeException());
+        }
+    }
+
+
+    @Override
+    public Uni<ToggleLockSnapshotResponse> toggleLockSnapshot(ToggleLockSnapshotRequest request) {
+
+        final String lockerId = request.getLockerId();
+        return parseObjectId(request.getSnapshotId())
+                .chain(objectId -> {
+                    Bson filter = Filters.eq("_id", objectId);
+
+                    return snapshotCollection.find(filter).collect().first()
+                            .onItem().ifNull().failWith(() -> new StatusRuntimeException(Status.NOT_FOUND.withDescription("This snapshot does not exist in the database.")))
+                            .chain(document -> {
+                                boolean currentLock = document.getBoolean("locked", false);
+                                boolean newLockStatus = !currentLock;
+
+                                Bson updates = Updates.combine(
+                                        Updates.set("locked", newLockStatus),
+                                        newLockStatus ? Updates.set("locked_by", lockerId) : Updates.unset("locked_by")
+                                );
+
+                                return snapshotCollection.updateOne(filter, updates)
+                                        .chain((result) -> {
+                                            if (result.getModifiedCount() == 0) {
+                                                return Uni.createFrom().failure(new StatusRuntimeException(Status.ABORTED.withDescription("The snapshot was not modified.")));
+                                            }
+                                            return Uni.createFrom().item(ToggleLockSnapshotResponse.newBuilder().setLockStatus(newLockStatus).build());
+                                        })
+                                        .onFailure().invoke((e) -> {
+                                            if (!(e instanceof StatusRuntimeException)) {
+                                                log.error("Database error occurred during snapshot locking", e);
+                                            }
+                                        })
+                                        .onFailure().transform((e) -> {
+                                            if (e instanceof StatusRuntimeException) return e;
+                                            return Status.INTERNAL.withCause(e).withDescription("Database error occurred").asRuntimeException();
+                                        });
+                            });
+                });
+    }
+
+    @Override
     public Uni<Empty> takeDatabaseSnapshot(TakeDatabaseSnapshotRequest req) {
         Map<String, byte[]> payload = new HashMap<>();
         payload.put("granularity", "FULL".getBytes(StandardCharsets.UTF_8));
@@ -153,15 +205,6 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
                 .chain(doc -> extractAndDecompressPayload(doc)
                         .chain(decompressedBytes -> buildResponse(doc, snapshotId, decompressedBytes)))
                 .onFailure().invoke(e -> log.errorf("Failed to process ViewSnapshot request for ID: %s. Reason: %s", snapshotId, e.getMessage()));
-    }
-
-    private Uni<ObjectId> parseObjectId(String snapshotId) {
-        try {
-            return Uni.createFrom().item(new ObjectId(snapshotId));
-        } catch (IllegalArgumentException e) {
-            log.errorf(e, "Invalid format for snapshot ID '%s'", snapshotId);
-            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withCause(e).withDescription("The provided Snapshot ID has an invalid format.").asRuntimeException());
-        }
     }
 
     private Uni<Document> fetchSnapshotDocument(ObjectId objectId, String snapshotId) {
