@@ -1,11 +1,11 @@
 package tech.skworks.tachyon.plugin.internal.player.component;
 
-import tech.skworks.tachyon.contracts.player.*;
+import tech.skworks.tachyon.service.contracts.player.*;
 import tech.skworks.tachyon.libs.com.google.protobuf.Any;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 import tech.skworks.tachyon.libs.io.grpc.Status;
 import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
-import tech.skworks.tachyon.plugin.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.retry.RetryQueue;
 import tech.skworks.tachyon.plugin.internal.util.AbstractGrpcService;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;

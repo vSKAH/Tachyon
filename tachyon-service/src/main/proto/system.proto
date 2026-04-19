@@ -1,9 +1,9 @@
 syntax = "proto3";
 
 option java_multiple_files = true;
-option java_package = "tech.skworks.tachyon.contracts.system";
+option java_package = "tech.skworks.tachyon.service.contracts.system";
 
-package tachyon.system;
+package tech.skworks.tachyon.service.contracts.system;
 
 service System {
   rpc Ping (PingRequest) returns (PingResponse) {}

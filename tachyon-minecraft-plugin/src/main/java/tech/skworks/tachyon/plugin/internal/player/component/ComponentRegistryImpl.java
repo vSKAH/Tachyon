@@ -9,7 +9,7 @@ import tech.skworks.tachyon.api.registries.ComponentRegistry;
 import tech.skworks.tachyon.libs.com.google.protobuf.Any;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 import tech.skworks.tachyon.libs.com.google.protobuf.Parser;
-import tech.skworks.tachyon.plugin.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 
 import java.util.Map;

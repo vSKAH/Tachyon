@@ -1,5 +1,5 @@
 syntax = "proto3";
-package tachyon.snapshot;
+package tech.skworks.tachyon.service.contracts.snapshot;
 
 import "google/protobuf/empty.proto";
 import "google/protobuf/any.proto";
@@ -7,12 +7,12 @@ import "google/protobuf/any.proto";
 import "player.proto";
 
 option java_multiple_files = true;
-option java_package = "tech.skworks.tachyon.contracts.snapshot";
+option java_package = "tech.skworks.tachyon.service.contracts.snapshot";
 
 service SnapshotService {
   rpc CreateSnapshot (SnapshotRequest) returns (google.protobuf.Empty);
   rpc CreateSpecificSnapshot (SpecificSnapshotRequest) returns (google.protobuf.Empty);
-  rpc RevertToSnapshot (RevertRequest) returns (tachyon.player.PlayerResponse);
+  rpc RevertToSnapshot (RevertRequest) returns (tech.skworks.tachyon.service.contracts.player.PlayerResponse);
   rpc ListSnapshots (SnapshotListRequest) returns (SnapshotListResponse);
   rpc ViewSnapshot (ViewSnapshotRequest) returns (DecodeSnapshotResponse);
 }

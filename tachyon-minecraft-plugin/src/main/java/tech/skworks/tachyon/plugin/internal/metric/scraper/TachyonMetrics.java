@@ -7,7 +7,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
-import tech.skworks.tachyon.plugin.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 
 import java.io.File;

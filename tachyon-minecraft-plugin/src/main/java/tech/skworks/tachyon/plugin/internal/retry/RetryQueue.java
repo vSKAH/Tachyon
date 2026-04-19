@@ -1,7 +1,7 @@
 package tech.skworks.tachyon.plugin.internal.retry;
 
 import org.bukkit.Bukkit;
-import tech.skworks.tachyon.plugin.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 
 import java.util.ArrayDeque;

@@ -1,6 +1,6 @@
 package tech.skworks.tachyon.plugin.internal.player.heartbeat;
 
-import tech.skworks.tachyon.plugin.plugin.config.TachyonConfig;
+import tech.skworks.tachyon.plugin.spigot.config.TachyonConfig;
 
 /**
  * Project Tachyon

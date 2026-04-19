@@ -1,9 +1,9 @@
 package tech.skworks.tachyon.plugin.internal.player;
 
-import tech.skworks.tachyon.contracts.player.PlayerResponse;
+import tech.skworks.tachyon.service.contracts.player.PlayerResponse;
 import tech.skworks.tachyon.libs.com.google.protobuf.Any;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
-import tech.skworks.tachyon.plugin.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.player.component.ComponentRegistryImpl;
 import tech.skworks.tachyon.plugin.internal.player.component.ComponentService;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;

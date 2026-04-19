@@ -1,11 +1,12 @@
 syntax = "proto3";
-package tachyon.player;
+package tech.skworks.tachyon.service.contracts.player;
 
 import "google/protobuf/empty.proto";
 import "google/protobuf/any.proto";
 
 option java_multiple_files = true;
-option java_package = "tech.skworks.tachyon.contracts.player";
+option java_package = "tech.skworks.tachyon.service.contracts.player";
+
 
 service PlayerDataService {
   rpc GetPlayer             (PlayerRequest)          returns (PlayerResponse);

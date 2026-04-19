@@ -42,7 +42,7 @@
 
         <dependency>
             <groupId>tech.sk-works.minecraft</groupId>
-            <artifactId>tachyon-minecraft-api</artifactId>
+            <artifactId>tachyon-api</artifactId>
             <version>1.0.0</version>
             <scope>provided</scope>
         </dependency>

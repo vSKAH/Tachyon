@@ -11,7 +11,7 @@
     <modules>
         <module>tachyon-service</module>
         <module>tachyon-libs</module>
-        <module>tachyon-minecraft-api</module>
+        <module>tachyon-api</module>
         <module>tachyon-minecraft-plugin</module>
         <module>tachyon-minecraft-exemple</module>
     </modules>

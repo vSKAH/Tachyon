@@ -1,14 +1,14 @@
 package tech.skworks.tachyon.plugin.internal;
 
-import tech.skworks.tachyon.contracts.audit.AuditServiceGrpc;
-import tech.skworks.tachyon.contracts.player.PlayerDataServiceGrpc;
-import tech.skworks.tachyon.contracts.snapshot.SnapshotServiceGrpc;
-import tech.skworks.tachyon.contracts.system.PingRequest;
-import tech.skworks.tachyon.contracts.system.PingResponse;
-import tech.skworks.tachyon.contracts.system.SystemGrpc;
+import tech.skworks.tachyon.service.contracts.audit.AuditServiceGrpc;
+import tech.skworks.tachyon.service.contracts.player.PlayerDataServiceGrpc;
+import tech.skworks.tachyon.service.contracts.snapshot.SnapshotServiceGrpc;
+import tech.skworks.tachyon.service.contracts.system.PingRequest;
+import tech.skworks.tachyon.service.contracts.system.PingResponse;
+import tech.skworks.tachyon.service.contracts.system.SystemGrpc;
 import tech.skworks.tachyon.libs.io.grpc.ManagedChannel;
 import tech.skworks.tachyon.libs.io.grpc.ManagedChannelBuilder;
-import tech.skworks.tachyon.plugin.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 
 import java.util.concurrent.ExecutorService;

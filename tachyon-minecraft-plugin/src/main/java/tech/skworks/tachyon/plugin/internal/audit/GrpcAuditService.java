@@ -3,9 +3,9 @@ package tech.skworks.tachyon.plugin.internal.audit;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.services.AuditService;
-import tech.skworks.tachyon.contracts.audit.LogBatchRequest;
-import tech.skworks.tachyon.contracts.audit.LogRequest;
-import tech.skworks.tachyon.plugin.plugin.TachyonCore;
+import tech.skworks.tachyon.service.contracts.audit.LogBatchRequest;
+import tech.skworks.tachyon.service.contracts.audit.LogRequest;
+import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.internal.GrpcClientManager;
 

@@ -5,7 +5,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jspecify.annotations.NonNull;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
-import tech.skworks.tachyon.plugin.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.player.component.ComponentService;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 

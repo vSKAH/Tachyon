@@ -2,7 +2,7 @@ name: Tachyon-Core
 description: Bridge between tachyon service and bukkit server
 version: 1.0.0-SNAPSHOT
 author: "vSKAH"
-main: tech.skworks.tachyon.plugin.plugin.TachyonCore
+main: tech.skworks.tachyon.plugin.spigot.TachyonCore
 softdepend:
   - "spark"
 commands:

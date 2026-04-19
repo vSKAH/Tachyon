@@ -1,8 +1,7 @@
 package tech.skworks.tachyon.plugin.internal.metric;
 
 import io.prometheus.client.exporter.HTTPServer;
-import org.bukkit.plugin.java.JavaPlugin;
-import tech.skworks.tachyon.plugin.plugin.TachyonCore;
+import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.internal.metric.scraper.TachyonMetrics;
 import tech.skworks.tachyon.plugin.internal.metric.scraper.VanillaMetrics;
