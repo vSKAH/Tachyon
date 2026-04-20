@@ -1,9 +1,12 @@
 package tech.skworks.tachyon.plugin.internal.snapshots;
 
 import com.github.luben.zstd.Zstd;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.services.SnapshotService;
+import tech.skworks.tachyon.libs.io.grpc.Status;
+import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
 import tech.skworks.tachyon.service.contracts.snapshot.*;
 import tech.skworks.tachyon.libs.com.google.protobuf.ByteString;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
@@ -34,39 +37,60 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
         this.executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("snapshot-vthread-", 1).factory());
     }
 
-    //TODO: gérer les logs
-    private <T> CompletableFuture<T> asyncCall(Supplier<T> grpcCall) {
+    private <T> void handleGrpcExceptions(String actionName, StatusRuntimeException ex, CompletableFuture<T> future) {
+        final Status.Code code = ex.getStatus().getCode();
+        final String description = ex.getStatus().getDescription();
+
+        switch (code) {
+            case NOT_FOUND:
+            case INVALID_ARGUMENT:
+            case ABORTED:
+                LOGGER.log(Level.DEBUG, "Action '{}' rejected by backend (Business logic): {}", actionName, description);
+                break;
+
+            case DATA_LOSS:
+            case UNAVAILABLE:
+            case INTERNAL:
+                LOGGER.error(ex, "Critical infrastructure failure during action '{}': {}", actionName, description);
+                break;
+
+            default:
+                LOGGER.error(ex, "Unexpected backend error during action '{}'", actionName);
+                break;
+        }
+
+        recordError(actionName, ex);
+        future.completeExceptionally(ex);
+    }
+
+    private <T> CompletableFuture<T> asyncCall(String actionName, Supplier<T> grpcCall) {
         CompletableFuture<T> future = new CompletableFuture<>();
 
         executor.execute(() -> {
-            try {
+            try (var _ = startTimer(actionName)) {
                 T result = grpcCall.get();
                 future.complete(result);
-            } catch (Throwable ex) {
+            } catch (StatusRuntimeException ex) {
+                handleGrpcExceptions(actionName, ex, future);
+            } catch (Exception ex) {
+                LOGGER.error(ex, "Client-side execution failure during action '{}'", actionName);
+                recordError(actionName, ex);
                 future.completeExceptionally(ex);
             }
         });
 
-        return future;
+        return future.orTimeout(4, TimeUnit.SECONDS);
     }
 
-    private CompletableFuture<Void> asyncRun(Runnable grpcCall) {
-        CompletableFuture<Void> future = new CompletableFuture<>();
-
-        executor.execute(() -> {
-            try {
-                grpcCall.run();
-                future.complete(null);
-            } catch (Throwable ex) {
-                future.completeExceptionally(ex);
-            }
+    private CompletableFuture<Void> asyncRun(String actionName, Runnable grpcCall) {
+        return asyncCall(actionName, () -> {
+            grpcCall.run();
+            return null;
         });
-
-        return future;
     }
 
     public CompletableFuture<Void> takeDatabaseSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason, @NotNull SnapshotTriggerType triggerType) {
-        return asyncRun(() -> {
+        return asyncRun("takeDatabaseSnapshot", () -> {
             TakeDatabaseSnapshotRequest request = TakeDatabaseSnapshotRequest.newBuilder().setPlayerId(playerUniqueId).setReason(reason).setTriggerType(triggerType).build();
             grpcClientManager.getSnapshotStub(3).takeDatabaseSnapshot(request);
         });
@@ -75,7 +99,7 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
     @Override
     public <T extends Message> CompletableFuture<Void> takeComponentSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason,
                                                                              @NotNull final SnapshotTriggerType triggerType, @NotNull final T component) {
-        return asyncRun(() -> {
+        return asyncRun("takeComponentSnapshot", () -> {
             TakeComponentSnapshotRequest request = TakeComponentSnapshotRequest.newBuilder().setPlayerId(playerUniqueId).setReason(reason)
                     .setTriggerType(triggerType).setTargetComponent(component.getDescriptorForType().getFullName())
                     .setRawData(ByteString.copyFrom(Zstd.compress(component.toByteArray()))).build();
@@ -85,15 +109,23 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
     }
 
     @Override
+    public CompletableFuture<ToggleLockSnapshotResponse> toggleSnapshotLocking(@NotNull final String snapshotId, @NotNull final String executorUniqueId) {
+        return asyncCall("toggleLockSnapshot", () -> {
+            ToggleLockSnapshotRequest request = ToggleLockSnapshotRequest.newBuilder().setSnapshotId(snapshotId).setLockerId(executorUniqueId).build();
+            return grpcClientManager.getSnapshotStub(3).toggleLockSnapshot(request);
+        });
+    }
+
+    @Override
     public CompletableFuture<ListSnapshotsResponse> getSnapshots(@NotNull final String playerUniqueId) {
-        return asyncCall(() -> {
+        return asyncCall("getSnapshots", () -> {
             ListSnapshotsRequest request = ListSnapshotsRequest.newBuilder().setPlayerId(playerUniqueId).build();
             return grpcClientManager.getSnapshotStub(3).listSnapshots(request);
         });
     }
 
     public CompletableFuture<DecodeSnapshotResponse> decodeSnapshot(@NotNull final String snapshotId) {
-        return asyncCall(() -> {
+        return asyncCall("decodeSnapshot", () -> {
             DecodeSnapshotRequest request = DecodeSnapshotRequest.newBuilder().setSnapshotId(snapshotId).build();
             return grpcClientManager.getSnapshotStub(3).decodeSnapshot(request);
         });

@@ -85,12 +85,10 @@
             <artifactId>quarkus-junit</artifactId>
             <scope>test</scope>
         </dependency>
-
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
-            <artifactId>netty-nio-client</artifactId>
+            <artifactId>url-connection-client</artifactId>
         </dependency>
-
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-container-image-jib</artifactId>

@@ -5,6 +5,7 @@ import tech.skworks.tachyon.service.contracts.snapshot.DecodeSnapshotResponse;
 import tech.skworks.tachyon.service.contracts.snapshot.ListSnapshotsResponse;
 import tech.skworks.tachyon.service.contracts.snapshot.SnapshotTriggerType;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
+import tech.skworks.tachyon.service.contracts.snapshot.ToggleLockSnapshotResponse;
 
 import java.util.concurrent.CompletableFuture;
 
@@ -60,6 +61,22 @@ public interface SnapshotService {
      * @return A CompletableFuture that completes when the backend has successfully saved the specific snapshot.
      */
     <T extends Message> CompletableFuture<Void> takeComponentSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason, @NotNull final SnapshotTriggerType triggerType, @NotNull final T component);
+
+
+    /**
+     * Asynchronously toggles the lock status of a specific snapshot.
+     * <p>
+     * A locked snapshot is protected from being automatically purged or archived by
+     * scheduled maintenance tasks (such as the S3 Archiver job). This method
+     * inverses the current lock state (locks an unlocked snapshot, or unlocks a locked one).
+     * </p>
+     *
+     * @param snapshotId       The unique identifier (ObjectId hex string) of the target snapshot. Must not be null.
+     * @param executorUniqueId The unique identifier (e.g., UUID) of the administrator or system executing this action. Must not be null.
+     * @return A {@link CompletableFuture} that, when successfully completed, yields a {@link ToggleLockSnapshotResponse}
+     * containing the newly applied lock status.
+     */
+    CompletableFuture<ToggleLockSnapshotResponse> toggleSnapshotLocking(@NotNull final String snapshotId, @NotNull final String executorUniqueId);
 
     /**
      * Retrieves the metadata history of all snapshots associated with a specific player.

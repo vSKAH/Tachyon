@@ -11,6 +11,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.inventory.ItemStack;
 import tech.skworks.tachyon.api.handler.ComponentPreviewHandler;
 import tech.skworks.tachyon.api.registries.ComponentRegistry;
@@ -96,7 +97,11 @@ public class SnapshotUIManager {
         for (SnapshotInfo daySnapshot : daySnapshots) {
             String instant = Instant.ofEpochMilli(daySnapshot.getTimestamp()).atZone(ZoneId.systemDefault()).format(TIME_FORMATTER); // Assure-toi que TIME_FORMATTER est défini
 
-            GuiItem folderItem = ItemBuilder.from(Material.BOOK).name(Component.text("§6" + instant))
+            boolean isLocked = daySnapshot.getLocked();
+            Material icon = isLocked ? Material.ENCHANTED_BOOK : Material.BOOK;
+            String lockLore = isLocked ? "§c🔒 Locked (Protected)" : "§a🔓 Unlocked (Auto-purgeable)";
+
+            GuiItem folderItem = ItemBuilder.from(icon).name(Component.text("§6" + instant))
                     .lore(
                             Component.text("§7Snapshot Id: §e" + daySnapshot.getSnapshotId()),
                             Component.empty(),
@@ -106,11 +111,36 @@ public class SnapshotUIManager {
                             Component.empty(),
                             Component.text("§7Reason: §e" + StringUtils.capitalize(daySnapshot.getReason())),
                             Component.empty(),
-                            Component.text("§a▶ Click to preview data"))
-                    .asGuiItem(_ -> {
+                            Component.text(lockLore),
+                            Component.empty(),
+                            Component.text("§a▶ Left-Click to preview data"),
+                            Component.text("§e▶ Middle-Click to toggle lock"))
+                    .asGuiItem(event -> {
+                        ClickType click = event.getClick();
+                        if (click == ClickType.MIDDLE) {
+                            player.sendMessage("§7Updating the locking state...");
+
+                            plugin.getSnapshotService().toggleSnapshotLocking(daySnapshot.getSnapshotId(), player.getUniqueId().toString())
+                                    .whenComplete((response, error) -> {
+                                        Bukkit.getScheduler().runTask(plugin, () -> {
+                                            if (error != null) {
+                                                player.sendMessage(error.getMessage());
+                                                return;
+                                            }
+
+                                            if (response.getLockStatus()) {
+                                                player.sendMessage("§aSuccess, the snapshot has locked!");
+                                            } else {
+                                                player.sendMessage("§eSuccess, the snapshot has unlocked !");
+                                            }
+
+                                            gui.update();
+                                        });
+                                    });
+                            return;
+                        }
                         player.closeInventory();
-                        openSnapshotPreview(plugin, player, daySnapshot.getSnapshotId(), daySnapshot.getGranularity(),
-                                () -> openSnapshotFoldersGui(plugin, player, target, daySnapshots));
+                        openSnapshotPreview(plugin, player, daySnapshot.getSnapshotId(), daySnapshot.getGranularity(), () -> openSnapshotFoldersGui(plugin, player, target, daySnapshots));
                     });
 
             gui.addItem(folderItem);

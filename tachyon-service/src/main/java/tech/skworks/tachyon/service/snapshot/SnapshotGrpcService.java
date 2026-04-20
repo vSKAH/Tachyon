@@ -87,7 +87,6 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
         }
     }
 
-
     @Override
     public Uni<ToggleLockSnapshotResponse> toggleLockSnapshot(ToggleLockSnapshotRequest request) {
 
@@ -158,6 +157,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
                 .onFailure().transform(e -> Status.UNAVAILABLE.withDescription("The snapshot buffer (Redis) is currently unavailable.").withCause(e).asRuntimeException());
     }
 
+
     @Override
     public Uni<ListSnapshotsResponse> listSnapshots(ListSnapshotsRequest req) {
         if (req.getPlayerId().isBlank()) {
@@ -171,27 +171,36 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
                     log.errorf(e, "Failed to fetch snapshots for player %s", req.getPlayerId());
                     return Status.INTERNAL.withDescription("Database error occurred").withCause(e).asRuntimeException();
                 }).map(docs -> {
-                    ListSnapshotsResponse.Builder res = ListSnapshotsResponse.newBuilder().setPlayerId(req.getPlayerId());
+                    ListSnapshotsResponse.Builder response = ListSnapshotsResponse.newBuilder().setPlayerId(req.getPlayerId());
 
-                    for (Document d : docs) {
+                    for (Document document : docs) {
                         try {
-                            String typeStr = d.getString("type");
+                            String typeStr = document.getString("type");
                             SnapshotTriggerType type = (typeStr != null) ? SnapshotTriggerType.valueOf(typeStr) : SnapshotTriggerType.SNAPSHOT_TRIGGER_UNSPECIFIED;
 
-                            res.addSnapshots(SnapshotInfo.newBuilder()
-                                    .setSnapshotId(d.getObjectId("_id").toHexString())
+                            Number timestampNum = document.get("timestamp", Number.class);
+                            long timestamp = (timestampNum != null) ? timestampNum.longValue() : 0L;
+
+                            String reason = document.getString("reason");
+                            String source = document.getString("source");
+                            String granularity = document.getString("granularity");
+
+                            response.addSnapshots(SnapshotInfo.newBuilder()
+                                    .setSnapshotId(document.getObjectId("_id").toHexString())
                                     .setTriggerType(type)
-                                    .setTimestamp(d.getLong("timestamp") != null ? d.getLong("timestamp") : 0L)
-                                    .setReason(d.getString("reason") != null ? d.getString("reason") : "N/A")
-                                    .setSource(d.getString("source") != null ? d.getString("source") : "UNKNOWN")
-                                    .setGranularity(d.getString("granularity") != null ? d.getString("granularity") : "FULL")
+                                    .setTimestamp(timestamp)
+                                    .setReason(reason != null ? reason : "N/A")
+                                    .setSource(source != null ? source : "UNKNOWN")
+                                    .setGranularity(granularity != null ? granularity : "FULL")
+                                    .setLocked(document.getBoolean("locked", false))
                                     .build());
+
                         } catch (Exception e) {
-                            log.warnf("Skipping corrupted snapshot document %s: %s", d.getObjectId("_id"), e.getMessage());
+                            log.warnf("Skipping corrupted snapshot document %s: %s", document.getObjectId("_id"), e.getMessage());
                         }
                     }
 
-                    return res.build();
+                    return response.build();
                 });
     }
 

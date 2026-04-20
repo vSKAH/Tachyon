@@ -71,6 +71,7 @@ message SnapshotInfo {
   string reason = 4;
   string source = 5;
   string granularity = 6;
+  bool locked = 7;
 }
 
 enum SnapshotTriggerType {
