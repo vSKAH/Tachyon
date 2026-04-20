@@ -45,7 +45,7 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
             case NOT_FOUND:
             case INVALID_ARGUMENT:
             case ABORTED:
-                LOGGER.log(Level.DEBUG, "Action '{}' rejected by backend (Business logic): {}", actionName, description);
+                LOGGER.warn("Action '{}' rejected by backend (Code logic): {}", actionName, description);
                 break;
 
             case DATA_LOSS:
