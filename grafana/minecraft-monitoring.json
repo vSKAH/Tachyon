@@ -262,13 +262,13 @@
       "id": 4,
       "options": {
         "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
+        "graphMode": "area",
+        "justifyMode": "center",
         "orientation": "auto",
         "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
-            "lastNotNull"
+            "last"
           ],
           "fields": "",
           "values": false
@@ -428,19 +428,6 @@
       "type": "stat"
     },
     {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 5
-      },
-      "id": 8,
-      "panels": [],
-      "title": "📈 Performance Minecraft",
-      "type": "row"
-    },
-    {
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -454,12 +441,14 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
+            "axisGridShow": false,
             "axisLabel": "",
             "axisPlacement": "auto",
+            "axisSoftMin": 0,
             "barAlignment": 0,
             "barWidthFactor": 0.6,
             "drawStyle": "line",
-            "fillOpacity": 8,
+            "fillOpacity": 14,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -468,6 +457,9 @@
             },
             "insertNulls": false,
             "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
             "lineWidth": 2,
             "pointSize": 5,
             "scaleDistribution": {
@@ -484,6 +476,8 @@
               "mode": "off"
             }
           },
+          "decimals": 0,
+          "fieldMinMax": false,
           "mappings": [],
           "min": 0,
           "thresholds": {
@@ -495,15 +489,210 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "sishort"
         },
         "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 34,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": true,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "spigot_players_total{server_name=~\"$server_name\"}",
+          "instant": false,
+          "legendFormat": "{{server_name}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Joueurs uniques (total)",
+      "transparent": true,
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "id": 8,
+      "panels": [],
+      "title": "📈 Performance Minecraft",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisGridShow": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "axisSoftMax": 20,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "barWidthFactor": 0.3,
+            "drawStyle": "line",
+            "fillOpacity": 7,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "max": 20,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": 0
+              },
+              {
+                "color": "dark-red",
+                "value": 18
+              },
+              {
+                "color": "yellow",
+                "value": 19
+              },
+              {
+                "color": "green",
+                "value": 19.5
+              },
+              {
+                "color": "dark-green",
+                "value": 20
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tachyon-1 5s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "dark-red",
+                  "mode": "thresholds"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tachyon-1 1m"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "dark-red",
+                  "mode": "thresholds"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tachyon-1 5m"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "dark-red",
+                  "mode": "thresholds"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tachyon-1 15m"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "dark-red",
+                  "mode": "thresholds"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 9,
         "w": 14,
         "x": 0,
-        "y": 6
+        "y": 13
       },
       "id": 9,
       "options": {
@@ -514,7 +703,7 @@
           "showLegend": true
         },
         "tooltip": {
-          "hideZeros": false,
+          "hideZeros": true,
           "mode": "multi",
           "sort": "desc"
         }
@@ -571,6 +760,7 @@
         }
       ],
       "title": "TPS par serveur",
+      "transparent": true,
       "type": "timeseries"
     },
     {
@@ -581,7 +771,8 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds",
+            "seriesBy": "last"
           },
           "custom": {
             "axisBorderShow": false,
@@ -623,20 +814,101 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "dark-green",
                 "value": 0
+              },
+              {
+                "color": "super-light-green",
+                "value": 20
+              },
+              {
+                "color": "yellow",
+                "value": 40
+              },
+              {
+                "color": "red",
+                "value": 45
+              },
+              {
+                "color": "dark-red",
+                "value": 50
               }
             ]
           },
           "unit": "ms"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tachyon-1 médian"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "transparent",
+                  "mode": "thresholds",
+                  "seriesBy": "last"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tachyon-1 max"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "transparent",
+                  "mode": "thresholds",
+                  "seriesBy": "last"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tachyon-1 p95"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "thresholds",
+                  "seriesBy": "last"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tachyon-1 mean"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "thresholds",
+                  "seriesBy": "last"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 9,
         "w": 10,
         "x": 14,
-        "y": 6
+        "y": 13
       },
       "id": 10,
       "options": {
@@ -696,6 +968,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
+          "exemplar": false,
           "expr": "spigot_mspt{server_name=~\"$server_name\",metric_type=\"mean\",time_window=\"1m\"}",
           "instant": false,
           "legendFormat": "{{server_name}} mean",
@@ -704,6 +977,7 @@
         }
       ],
       "title": "MSPT (ms/tick)",
+      "transparent": true,
       "type": "timeseries"
     },
     {
@@ -734,7 +1008,7 @@
         "h": 4,
         "w": 7,
         "x": 0,
-        "y": 15
+        "y": 22
       },
       "id": 7,
       "options": {
@@ -800,7 +1074,7 @@
         "h": 4,
         "w": 7,
         "x": 7,
-        "y": 15
+        "y": 22
       },
       "id": 17,
       "options": {
@@ -874,7 +1148,7 @@
         "h": 4,
         "w": 10,
         "x": 14,
-        "y": 15
+        "y": 22
       },
       "id": 18,
       "options": {
@@ -918,203 +1192,12 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 19
+        "y": 26
       },
       "id": 26,
       "panels": [],
       "title": "🧠 Tachyon Plugin",
       "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "match": "null",
-                "result": {
-                  "index": 0,
-                  "text": "0"
-                }
-              },
-              "type": "special"
-            },
-            {
-              "options": {
-                "match": "empty",
-                "result": {
-                  "index": 1,
-                  "text": "0"
-                }
-              },
-              "type": "special"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 1
-              },
-              {
-                "color": "red",
-                "value": 10
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 0,
-        "y": 20
-      },
-      "id": 27,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "12.4.2",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "tachyon_plugin_grpc_errors_total{server_name=~\"$server_name\"}",
-          "instant": false,
-          "legendFormat": "{{server_name}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Erreurs gRPC (total)",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "match": "empty",
-                "result": {
-                  "index": 0,
-                  "text": "0"
-                }
-              },
-              "type": "special"
-            },
-            {
-              "options": {
-                "match": "null",
-                "result": {
-                  "index": 1,
-                  "text": "0"
-                }
-              },
-              "type": "special"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 1
-              },
-              {
-                "color": "red",
-                "value": 5
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 4,
-        "y": 20
-      },
-      "id": 28,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "text": {},
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "12.4.2",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "increase(tachyon_plugin_grpc_errors_total{server_name=~\"$server_name\"}[5m])",
-          "instant": false,
-          "legendFormat": "{{server_name}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Erreurs gRPC (5m)",
-      "type": "stat"
     },
     {
       "datasource": {
@@ -1149,10 +1232,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 8,
-        "y": 20
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 27
       },
       "id": 29,
       "options": {
@@ -1215,10 +1298,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 3,
-        "x": 12,
-        "y": 20
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 27
       },
       "id": 30,
       "options": {
@@ -1289,10 +1372,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 3,
-        "x": 15,
-        "y": 20
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 27
       },
       "id": 31,
       "options": {
@@ -1341,6 +1424,103 @@
             "mode": "thresholds"
           },
           "fieldMinMax": false,
+          "mappings": [
+            {
+              "options": {
+                "match": "empty",
+                "result": {
+                  "index": 0,
+                  "text": "0"
+                }
+              },
+              "type": "special"
+            },
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "index": 1,
+                  "text": "0"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 0.05
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 28,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (server_name, method, error_type) (rate(tachyon_plugin_grpc_errors_total[5m]))",
+          "instant": false,
+          "legendFormat": "[{{server_name}}] - {{method}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Erreurs gRPC (5m)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "fieldMinMax": false,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -1364,17 +1544,17 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 20
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 32
       },
       "id": 32,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "auto",
-        "orientation": "auto",
+        "orientation": "horizontal",
         "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
@@ -1401,13 +1581,112 @@
           "format": "time_series",
           "instant": false,
           "interval": "",
-          "legendFormat": "{{server_name}} | {{level}}",
+          "legendFormat": "[{{server_name}}] - {{level}}",
           "range": true,
           "refId": "A"
         }
       ],
       "title": "Erreurs console (total)",
       "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "fieldMinMax": false,
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "index": 0,
+                  "text": "0"
+                }
+              },
+              "type": "special"
+            },
+            {
+              "options": {
+                "match": "empty",
+                "result": {
+                  "index": 1,
+                  "text": "0"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 2
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "id": 27,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": true
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "12.4.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "sum by (server_name, method, error_type) (increase(tachyon_plugin_grpc_errors_total[$__range]))",
+          "format": "time_series",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "[{{server_name}}] - {{method}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Erreurs gRPC (total)",
+      "transparent": true,
+      "type": "gauge"
     },
     {
       "datasource": {
@@ -1469,10 +1748,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 16,
+        "h": 7,
+        "w": 24,
         "x": 0,
-        "y": 24
+        "y": 52
       },
       "id": 33,
       "options": {
@@ -1528,103 +1807,7 @@
         }
       ],
       "title": "Latence gRPC (p50, p95, p99)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 8,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 24
-      },
-      "id": 34,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "pluginVersion": "12.4.2",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "spigot_players_total{server_name=~\"$server_name\"}",
-          "instant": false,
-          "legendFormat": "{{server_name}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Joueurs uniques (total)",
+      "transparent": true,
       "type": "timeseries"
     },
     {
@@ -1633,7 +1816,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 59
       },
       "id": 11,
       "panels": [],
@@ -1678,7 +1861,7 @@
         "h": 8,
         "w": 9,
         "x": 2,
-        "y": 33
+        "y": 60
       },
       "id": 12,
       "options": {
@@ -1777,7 +1960,7 @@
         "h": 8,
         "w": 9,
         "x": 13,
-        "y": 33
+        "y": 60
       },
       "id": 14,
       "options": {
@@ -1886,7 +2069,7 @@
         "h": 8,
         "w": 9,
         "x": 2,
-        "y": 41
+        "y": 68
       },
       "id": 13,
       "options": {
@@ -1980,7 +2163,7 @@
         "h": 4,
         "w": 9,
         "x": 13,
-        "y": 41
+        "y": 68
       },
       "id": 16,
       "options": {
@@ -2054,7 +2237,7 @@
         "h": 4,
         "w": 9,
         "x": 13,
-        "y": 45
+        "y": 72
       },
       "id": 15,
       "options": {
@@ -2098,7 +2281,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 76
       },
       "id": 19,
       "panels": [],
@@ -2168,7 +2351,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 50
+        "y": 77
       },
       "id": 20,
       "options": {
@@ -2289,7 +2472,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 50
+        "y": 77
       },
       "id": 21,
       "options": {
@@ -2398,7 +2581,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 50
+        "y": 77
       },
       "id": 22,
       "options": {
@@ -2484,7 +2667,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 58
+        "y": 85
       },
       "id": 23,
       "options": {
@@ -2558,7 +2741,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 58
+        "y": 85
       },
       "id": 24,
       "options": {
@@ -2624,7 +2807,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 58
+        "y": 85
       },
       "id": 25,
       "options": {
@@ -2700,13 +2883,13 @@
     ]
   },
   "time": {
-    "from": "now-5m",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Minecraft Servers  Monitoring Copy",
-  "uid": "addjccm",
-  "version": 1,
+  "title": "Minecraft Servers  Monitoring",
+  "uid": "minecraft-tachyon-monitoring",
+  "version": 9,
   "weekStart": ""
 }
