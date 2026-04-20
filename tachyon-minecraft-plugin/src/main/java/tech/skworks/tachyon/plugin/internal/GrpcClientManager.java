@@ -53,7 +53,7 @@ public class GrpcClientManager {
             boolean success = response != null;
             if (success) {
                 long time = response.getServerTime() - send;
-                LOGGER.info("The ping took {}ms to respond", time);
+                LOGGER.info("The ping took {}ms to respond ({})", time, response.getTachyonServerName());
             }
             return success;
         } catch (Exception e) {

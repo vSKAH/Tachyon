@@ -13,7 +13,6 @@ service SnapshotService {
   rpc TakeDatabaseSnapshot (TakeDatabaseSnapshotRequest) returns (google.protobuf.Empty);
   rpc TakeComponentSnapshot (TakeComponentSnapshotRequest) returns (google.protobuf.Empty);
   rpc ToggleLockSnapshot (ToggleLockSnapshotRequest) returns (ToggleLockSnapshotResponse);
-  rpc RevertToSnapshot (RevertToSnapshotRequest) returns (tech.skworks.tachyon.service.contracts.player.GetPlayerResponse);
   rpc ListSnapshots (ListSnapshotsRequest) returns (ListSnapshotsResponse);
   rpc DecodeSnapshot (DecodeSnapshotRequest) returns (DecodeSnapshotResponse);
 }
@@ -39,11 +38,6 @@ message ToggleLockSnapshotRequest {
 
 message ToggleLockSnapshotResponse {
   bool lock_status = 1;
-}
-
-message RevertToSnapshotRequest {
-  string player_id = 1;
-  string snapshot_id = 2;
 }
 
 message ListSnapshotsRequest {

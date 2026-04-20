@@ -40,6 +40,7 @@ public class VanillaMetrics {
     private Handler errorAppender;
     private Spark spark;
 
+    //TODO: using micrometters
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("VanillaMetrics");
     private static final Gauge TPS = Gauge.build().name("spigot_tps").help("Ticks par seconde (10s, 1m, 5m, 15m)").labelNames("server_name", "time_window").register();
     private static final Gauge MSPT = Gauge.build().name("spigot_mspt").help("Millisecondes par tick (moyenne, max, 95th percentile)").labelNames("server_name", "metric_type", "time_window").register();
@@ -197,9 +198,8 @@ public class VanillaMetrics {
 
                 ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
                 THREADS.labels(serverName).set(threadBean.getThreadCount());
-
             } catch (Exception e) {
-                LOGGER.error(e,"Erreur critique dans le thread asynchrone des métriques");
+                LOGGER.error(e,"Fatal error during metrics collection");
             }
         });
     }

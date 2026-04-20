@@ -24,7 +24,6 @@ public class TachyonLogger {
         this.prefix = "[" + moduleName + "] ";
     }
 
-
     public void info(String message, Object... params) {
         log.info(new ParameterizedMessage(prefix + message, params));
     }
@@ -40,7 +39,6 @@ public class TachyonLogger {
     public void error(Throwable exception, String message, Object... params) {
         log.error(new ParameterizedMessage(prefix + message, params), exception);
     }
-
 
     public void log(Level level, String message, Object... params) {
         log.log(level, new ParameterizedMessage(prefix + message, params));

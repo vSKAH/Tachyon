@@ -30,7 +30,6 @@ import org.bson.types.Binary;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.service.contracts.player.GetPlayerResponse;
 import tech.skworks.tachyon.service.contracts.snapshot.*;
 import tech.skworks.tachyon.service.infra.DynamicProtobufRegistry;
 
@@ -51,22 +50,22 @@ import java.util.Map;
 public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServiceImplBase {
 
     @Inject
-    Logger log;
+    Logger logger;
     @Inject
     SnapshotConfig snapshotConfig;
+
+    @Inject
+    DynamicProtobufRegistry protobufRegistry;
 
     @Inject
     ReactiveMongoClient mongoClient;
     @ConfigProperty(name = "quarkus.mongodb.database")
     String databaseName;
 
-    @Inject
-    DynamicProtobufRegistry protobufRegistry;
+    private ReactiveMongoCollection<Document> snapshotCollection;
 
     private final ReactiveStreamCommands<String, String, byte[]> redisStream;
     private static final XAddArgs STREAM_ARGS = new XAddArgs().maxlen(20000L).nearlyExactTrimming();
-
-    private ReactiveMongoCollection<Document> snapshotCollection;
 
     public SnapshotGrpcService(ReactiveRedisDataSource redisDS) {
         this.redisStream = redisDS.stream(byte[].class);
@@ -75,14 +74,14 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
     @PostConstruct
     void init() {
         this.snapshotCollection = mongoClient.getDatabase(databaseName).getCollection(snapshotConfig.collection());
-        this.log.debug("SnapshotGrpcService collections initialized.");
+        this.logger.debug("SnapshotGrpcService collections initialized.");
     }
 
     private Uni<ObjectId> parseObjectId(String snapshotId) {
         try {
             return Uni.createFrom().item(new ObjectId(snapshotId));
         } catch (IllegalArgumentException e) {
-            log.errorf(e, "Invalid format for snapshot ID '%s'", snapshotId);
+            logger.errorf(e, "Invalid format for snapshot ID '%s'", snapshotId);
             return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withCause(e).withDescription("The provided Snapshot ID has an invalid format.").asRuntimeException());
         }
     }
@@ -115,7 +114,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
                                         })
                                         .onFailure().invoke((e) -> {
                                             if (!(e instanceof StatusRuntimeException)) {
-                                                log.error("Database error occurred during snapshot locking", e);
+                                                logger.error("Database error occurred during snapshot locking", e);
                                             }
                                         })
                                         .onFailure().transform((e) -> {
@@ -153,7 +152,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
 
         return redisStream.xadd(snapshotConfig.streamKey(), STREAM_ARGS, payload)
                 .replaceWith(Empty.getDefaultInstance())
-                .onFailure().invoke(e -> log.error("Redis Stream Error", e))
+                .onFailure().invoke(e -> logger.error("Redis Stream Error", e))
                 .onFailure().transform(e -> Status.UNAVAILABLE.withDescription("The snapshot buffer (Redis) is currently unavailable.").withCause(e).asRuntimeException());
     }
 
@@ -168,7 +167,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
                         .sort(Sorts.descending("timestamp"))
                         .projection(Projections.exclude("data", "uuid")))
                 .collect().asList().onFailure().transform(e -> {
-                    log.errorf(e, "Failed to fetch snapshots for player %s", req.getPlayerId());
+                    logger.errorf(e, "Failed to fetch snapshots for player %s", req.getPlayerId());
                     return Status.INTERNAL.withDescription("Database error occurred").withCause(e).asRuntimeException();
                 }).map(docs -> {
                     ListSnapshotsResponse.Builder response = ListSnapshotsResponse.newBuilder().setPlayerId(req.getPlayerId());
@@ -196,7 +195,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
                                     .build());
 
                         } catch (Exception e) {
-                            log.warnf("Skipping corrupted snapshot document %s: %s", document.getObjectId("_id"), e.getMessage());
+                            logger.warnf("Skipping corrupted snapshot document %s: %s", document.getObjectId("_id"), e.getMessage());
                         }
                     }
 
@@ -213,7 +212,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
                 .chain(objectId -> fetchSnapshotDocument(objectId, snapshotId))
                 .chain(doc -> extractAndDecompressPayload(doc)
                         .chain(decompressedBytes -> buildResponse(doc, snapshotId, decompressedBytes)))
-                .onFailure().invoke(e -> log.errorf("Failed to process ViewSnapshot request for ID: %s. Reason: %s", snapshotId, e.getMessage()));
+                .onFailure().invoke(e -> logger.errorf("Failed to process ViewSnapshot request for ID: %s. Reason: %s", snapshotId, e.getMessage()));
     }
 
     private Uni<Document> fetchSnapshotDocument(ObjectId objectId, String snapshotId) {
@@ -221,7 +220,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
                 .onItem().ifNull().failWith(() -> Status.NOT_FOUND.withDescription("This snapshot does not exist in the database.").asRuntimeException())
                 .onFailure(e -> !(e instanceof io.grpc.StatusRuntimeException))
                 .transform(e -> {
-                    log.errorf(e, "Database error while fetching snapshot %s", snapshotId);
+                    logger.errorf(e, "Database error while fetching snapshot %s", snapshotId);
                     return Status.INTERNAL.withDescription("Database error occurred").withCause(e).asRuntimeException();
                 });
     }
@@ -250,7 +249,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
                 return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("Unknown granularity: " + granularity).asRuntimeException());
             }
         } catch (Exception e) {
-            log.errorf(e, "Data parsing corrupted for snapshot (ID: %s, Granularity: %s)", snapshotId, granularity);
+            logger.errorf(e, "Data parsing corrupted for snapshot (ID: %s, Granularity: %s)", snapshotId, granularity);
             return Uni.createFrom().failure(Status.DATA_LOSS.withDescription("Snapshot data is corrupted or cannot be parsed.").asRuntimeException());
         }
     }
@@ -281,7 +280,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
             JsonObject componentData = entry.getValue().getAsJsonObject();
 
             if (!componentData.has("@type")) {
-                log.warnf("Missing '@type' in 'components.%s' of snapshot: %s", entry.getKey(), snapshotId);
+                logger.warnf("Missing '@type' in 'components.%s' of snapshot: %s", entry.getKey(), snapshotId);
                 continue;
             }
 
@@ -324,13 +323,8 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
             if (e instanceof RuntimeException && Status.fromThrowable(e).getCode() != Status.Code.UNKNOWN) {
                 throw (RuntimeException) e;
             }
-            log.error("Error decompressing snapshot data", e);
+            logger.error("Error decompressing snapshot data", e);
             throw Status.INTERNAL.withDescription("Failed to decompress snapshot: " + e.getMessage()).asRuntimeException();
         }
-    }
-
-    @Override
-    public Uni<GetPlayerResponse> revertToSnapshot(RevertToSnapshotRequest request) {
-        return super.revertToSnapshot(request);
     }
 }

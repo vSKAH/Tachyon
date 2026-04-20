@@ -29,7 +29,6 @@ import org.bson.Document;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import tech.skworks.tachyon.service.contracts.player.*;
-import tech.skworks.tachyon.service.contracts.player.*;
 import tech.skworks.tachyon.service.infra.DynamicProtobufRegistry;
 
 import java.time.Duration;
@@ -45,7 +44,7 @@ import java.util.Map;
  */
 @GrpcService
 @NonBlocking
-public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDataServiceImplBase {
+public class PlayerGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDataServiceImplBase {
 
     @Inject
     Logger log;
@@ -54,13 +53,13 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
     @Inject
     DynamicProtobufRegistry protobufRegistry;
 
-
     @ConfigProperty(name = "quarkus.mongodb.database")
     String dbName;
     @Inject
     ReactiveMongoClient mongoClient;
+    @Inject
+    DynamicProtobufRegistry dynamicProtobufRegistry;
     private ReactiveMongoCollection<Document> playersCollection;
-
 
     private static final XAddArgs STREAM_ARGS = new XAddArgs().maxlen(10000L).nearlyExactTrimming();
     private final ReactiveValueCommands<String, String> redisString;
@@ -69,7 +68,7 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
     private final ReactiveKeyCommands<String> redisKey;
 
 
-    public PlayerDataGrpcService(ReactiveRedisDataSource redisDS) {
+    public PlayerGrpcService(ReactiveRedisDataSource redisDS) {
         this.redisString = redisDS.value(String.class);
         this.redisBytes = redisDS.value(byte[].class);
         this.redisStream = redisDS.stream(String.class, String.class, byte[].class);
@@ -170,6 +169,11 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
         final String dirtyKey = "player:dirty:" + uuid;
         final String typeUrl = req.getComponent().getTypeUrl();
 
+        if (dynamicProtobufRegistry.findDescriptor(typeUrl) == null) {
+            log.errorf("Unable to save the component %s for player %s. The component is not registered inside the registry", typeUrl, req.getUuid());
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("Unable to find the component " + typeUrl + " inside the service registry").asRuntimeException());
+        }
+
         log.debugf("[PlayerDataGrpcService] saveComponent() called for %s (type: %s).", uuid, typeUrl);
 
         return redisString.setex(dirtyKey, 20, "1").
@@ -187,8 +191,11 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
         final String dirtyKey = "player:dirty:" + uuid;
         final String url = req.getComponentUrl();
 
-        //TODO: drop if component is not loaded inside dynamic registry
+        if (dynamicProtobufRegistry.findDescriptor(url) == null) {
+            log.errorf("Unable to delete component %s for player %s. The component is not registered inside the registry", url, req.getUuid());
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("Unable to find the component " + url + " inside the service registry").asRuntimeException());
 
+        }
         log.debugf("[PlayerDataGrpcService] deleteComponent() called for %s (url: %s).", uuid, url);
 
         return redisString.setex(dirtyKey, 20, "1")

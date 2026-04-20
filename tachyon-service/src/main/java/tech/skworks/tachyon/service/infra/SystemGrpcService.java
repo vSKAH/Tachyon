@@ -3,6 +3,7 @@ package tech.skworks.tachyon.service.infra;
 import io.quarkus.grpc.GrpcService;
 import io.smallrye.common.annotation.NonBlocking;
 import io.smallrye.mutiny.Uni;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import tech.skworks.tachyon.service.contracts.system.MutinySystemGrpc;
 import tech.skworks.tachyon.service.contracts.system.PingRequest;
 import tech.skworks.tachyon.service.contracts.system.PingResponse;
@@ -19,10 +20,13 @@ import tech.skworks.tachyon.service.contracts.system.PingResponse;
 @NonBlocking
 public class SystemGrpcService extends MutinySystemGrpc.SystemImplBase {
 
+    @ConfigProperty(name = "quarkus.application.name")
+    String applicationName;
+
     @Override
     public Uni<PingResponse> ping(PingRequest request) {
         long serverTime = System.currentTimeMillis();
-        return Uni.createFrom().item(PingResponse.newBuilder().setServerTime(serverTime).build());
+        return Uni.createFrom().item(PingResponse.newBuilder().setServerTime(serverTime).setTachyonServerName(applicationName).build());
     }
 
 }
