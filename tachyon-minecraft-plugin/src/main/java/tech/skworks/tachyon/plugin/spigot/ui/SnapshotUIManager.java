@@ -134,7 +134,7 @@ public class SnapshotUIManager {
                                                 player.sendMessage("§eSuccess, the snapshot has unlocked !");
                                             }
 
-                                            gui.update();
+                                            player.closeInventory();
                                         });
                                     });
                             return;
