@@ -175,22 +175,7 @@ class PlayerStreamWorker {
         Document docToInsert = new Document(Document.parse(protobufRegistry.getPrinter().print(request.getComponent())));
         docToInsert.put("@type", shortType);
 
-        Document existingPlayer = playersCollection.find(Filters.eq("uuid", uuid)).first();
-        boolean hasChanged = true;
-
-        if (existingPlayer != null && existingPlayer.containsKey("components")) {
-            Document existingComp = existingPlayer.get("components", Document.class).get(cleanKey, Document.class);
-            if (existingComp != null && existingComp.equals(docToInsert)) {
-                hasChanged = false;
-                log.debugf("[PlayerStreamWorker] Component '%s' for %s is unchanged — skipping MongoDB write.", shortType, uuid);
-            }
-        }
-
-        if (hasChanged) {
-            //  takeSnapshotIfAllowed(uuid, "AUTO_UPDATE_" + cleanKey);
-            playersCollection.updateOne(Filters.eq("uuid", uuid), new Document("$set", new Document("components." + cleanKey, docToInsert)), new UpdateOptions().upsert(true));
-            log.infof("[PlayerStreamWorker] SaveComponent '%s' written to MongoDB for %s.", shortType, uuid);
-        }
+        playersCollection.updateOne(Filters.eq("uuid", uuid), new Document("$set", new Document("components." + cleanKey, docToInsert)), new UpdateOptions().upsert(true));
 
         updateCacheAndUnlock(uuid);
     }

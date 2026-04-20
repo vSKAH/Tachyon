@@ -25,7 +25,7 @@ import tech.skworks.tachyon.plugin.internal.metric.MetricsService;
 import tech.skworks.tachyon.plugin.internal.player.component.ComponentRegistryImpl;
 import tech.skworks.tachyon.plugin.internal.player.ProfileManager;
 import tech.skworks.tachyon.plugin.spigot.listener.ConnectionListener;
-import tech.skworks.tachyon.plugin.internal.player.component.ComponentService;
+import tech.skworks.tachyon.plugin.internal.player.component.GrpcComponentService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -50,7 +50,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
     private GrpcClientManager grpcClient;
 
     private GrpcAuditService grpcAuditService;
-    private ComponentService componentService;
+    private GrpcComponentService grpcComponentService;
     private ProfileManager profileManager;
     private ComponentRegistryImpl componentRegistryImpl;
     private GrpcSnapshotService grpcSnapshotService;
@@ -86,14 +86,14 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
         logger.info("Connection successful ! Backend is healthy.");
 
         this.componentRegistryImpl = new ComponentRegistryImpl();
-        this.componentService = new ComponentService(grpcClient, getDataFolder(), metricsService.getTachyonMetrics());
-        this.profileManager = new ProfileManager(componentService, componentRegistryImpl, metricsService.getTachyonMetrics());
+        this.grpcComponentService = new GrpcComponentService(grpcClient, getDataFolder(), metricsService.getTachyonMetrics());
+        this.profileManager = new ProfileManager(grpcComponentService, componentRegistryImpl, metricsService.getTachyonMetrics());
         this.grpcAuditService = new GrpcAuditService(grpcClient, config.serverName());
         this.grpcSnapshotService = new GrpcSnapshotService(metricsService.getTachyonMetrics(), grpcClient);
         this.heartBeatService = new HeartBeatService(metricsService.getTachyonMetrics(), grpcClient);
         Bukkit.getScheduler().runTaskTimer(this, new HeartBeatsTask(heartBeatService, config), 100, 120);
 
-        getServer().getPluginManager().registerEvents(new ConnectionListener(profileManager, heartBeatService, grpcAuditService, componentService), this);
+        getServer().getPluginManager().registerEvents(new ConnectionListener(profileManager, heartBeatService, grpcAuditService, grpcComponentService), this);
 
         registerCommand("snapshot", new SnapshotCommand(this));
 
@@ -142,7 +142,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
         }
 
         if (grpcAuditService != null) grpcAuditService.shutdown();
-        if (componentService != null) componentService.shutdown();
+        if (grpcComponentService != null) grpcComponentService.shutdown();
         if (grpcSnapshotService != null) grpcSnapshotService.shutdown();
         if (grpcClient != null) grpcClient.shutdown();
         if (metricsService != null) metricsService.shutdownMetricsCollection();

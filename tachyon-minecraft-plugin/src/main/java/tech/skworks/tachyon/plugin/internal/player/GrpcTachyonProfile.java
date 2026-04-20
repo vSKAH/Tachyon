@@ -6,7 +6,7 @@ import org.jspecify.annotations.NonNull;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
-import tech.skworks.tachyon.plugin.internal.player.component.ComponentService;
+import tech.skworks.tachyon.plugin.internal.player.component.GrpcComponentService;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 
 import java.util.*;
@@ -36,14 +36,14 @@ public class GrpcTachyonProfile implements TachyonProfile {
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("PlayerProfile");
 
     private final UUID uuid;
-    private final ComponentService componentService;
+    private final GrpcComponentService grpcComponentService;
 
     private final Set<Class<?>> dirty = ConcurrentHashMap.newKeySet();
     private final Map<Class<?>, Message> components = new ConcurrentHashMap<>();
 
-    public GrpcTachyonProfile(UUID uuid, ComponentService componentService) {
+    public GrpcTachyonProfile(UUID uuid, GrpcComponentService grpcComponentService) {
         this.uuid = uuid;
-        this.componentService = componentService;
+        this.grpcComponentService = grpcComponentService;
     }
 
     /**
@@ -126,7 +126,7 @@ public class GrpcTachyonProfile implements TachyonProfile {
     public <T extends Message> CompletableFuture<Void> saveComponent(@NotNull final T component) {
         components.put(component.getClass(), component);
         dirty.add(component.getClass());
-        return componentService.saveComponent(uuid, component);
+        return grpcComponentService.saveComponent(uuid, component);
     }
 
     /**
@@ -136,7 +136,7 @@ public class GrpcTachyonProfile implements TachyonProfile {
     public <T extends Message> CompletableFuture<Void> deleteComponent(@NotNull final T component) {
         components.remove(component.getClass());
         dirty.remove(component.getClass());
-        return componentService.deleteComponent(uuid, component);
+        return grpcComponentService.deleteComponent(uuid, component);
     }
 
     /**
@@ -157,7 +157,7 @@ public class GrpcTachyonProfile implements TachyonProfile {
 
         LOGGER.info("saveProfile() for {} — flushing {} dirty component(s): {}", uuid, toSave.size(), capturedDirtyClasses.stream().map(Class::getSimpleName).toList());
 
-        return componentService.saveProfile(uuid, toSave).whenComplete((result, exception) -> {
+        return grpcComponentService.saveProfile(uuid, toSave).whenComplete((result, exception) -> {
             if (exception == null) {
                 capturedDirtyClasses.forEach(dirty::remove);
                 LOGGER.info("saveProfile() completed successfully for {}.", uuid);

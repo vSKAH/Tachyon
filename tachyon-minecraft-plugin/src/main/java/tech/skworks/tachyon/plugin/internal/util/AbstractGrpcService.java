@@ -5,6 +5,11 @@ import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
 import tech.skworks.tachyon.plugin.internal.GrpcClientManager;
 import tech.skworks.tachyon.plugin.internal.metric.scraper.TachyonMetrics;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
+
 
 /**
  * Project Tachyon
@@ -38,6 +43,34 @@ public abstract class AbstractGrpcService {
 
     public void recordError(String method, String errorCode) {
         if (tachyonMetrics != null) tachyonMetrics.recordGrpcError(method, errorCode);
+    }
+
+    protected abstract <T> void handleGrpcExceptions(String actionName, StatusRuntimeException ex, CompletableFuture<T> future);
+
+    protected  <T> CompletableFuture<T> asyncCall(Executor executor, TachyonLogger logger, String actionName, Supplier<T> grpcCall) {
+        CompletableFuture<T> future = new CompletableFuture<>();
+
+        executor.execute(() -> {
+            try (var _ = startTimer(actionName)) {
+                T result = grpcCall.get();
+                future.complete(result);
+            } catch (StatusRuntimeException ex) {
+                handleGrpcExceptions(actionName, ex, future);
+            } catch (Exception ex) {
+                logger.error(ex, "Client-side execution failure during action '{}'", actionName);
+                recordError(actionName, ex);
+                future.completeExceptionally(ex);
+            }
+        });
+
+        return future.orTimeout(4, TimeUnit.SECONDS);
+    }
+
+    protected CompletableFuture<Void> asyncRun(Executor executor, TachyonLogger logger, String actionName, Runnable grpcCall) {
+        return asyncCall(executor, logger, actionName, () -> {
+            grpcCall.run();
+            return null;
+        });
     }
 
 }

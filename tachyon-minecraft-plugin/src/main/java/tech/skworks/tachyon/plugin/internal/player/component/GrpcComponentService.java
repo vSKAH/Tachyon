@@ -34,7 +34,7 @@ import java.util.concurrent.*;
  * @version 1.0
  * @since 1.0.0-SNAPSHOT
  */
-public class ComponentService extends AbstractGrpcService {
+public class GrpcComponentService extends AbstractGrpcService {
 
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("ComponentService");
 
@@ -42,7 +42,7 @@ public class ComponentService extends AbstractGrpcService {
     private final ScheduledExecutorService retryScheduler;
     private final File dataFolder;
 
-    public ComponentService(GrpcClientManager grpcClientManager, File dataFolder, @Nullable TachyonMetrics tachyonMetrics) {
+    public GrpcComponentService(GrpcClientManager grpcClientManager, File dataFolder, @Nullable TachyonMetrics tachyonMetrics) {
         super(tachyonMetrics, grpcClientManager);
         this.dataFolder = dataFolder;
         this.retryScheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("tachyon-retry-scheduler").factory());
@@ -91,6 +91,11 @@ public class ComponentService extends AbstractGrpcService {
         }
 
         return playerResponse;
+    }
+
+
+    @Override
+    protected <T> void handleGrpcExceptions(String actionName, StatusRuntimeException ex, CompletableFuture<T> future) {
     }
 
     public CompletableFuture<Void> saveProfile(UUID uuid, Collection<Message> components) {
@@ -159,10 +164,7 @@ public class ComponentService extends AbstractGrpcService {
             @Override
             public boolean execute() {
                 try (var _ = startTimer("SaveComponent")) {
-                    grpcClientManager.getPlayerStub(4).
-                            saveComponent(SaveComponentRequest.newBuilder()
-                                    .setUuid(uuid.toString()).setComponent(packed).build());
-
+                    grpcClientManager.getPlayerStub(4).saveComponent(SaveComponentRequest.newBuilder().setUuid(uuid.toString()).setComponent(packed).build());
 
                     future.complete(null);
                     return true;
@@ -346,5 +348,4 @@ public class ComponentService extends AbstractGrpcService {
     private static String typeUrlOf(Message m) {
         return "type.googleapis.com/" + m.getDescriptorForType().getFullName();
     }
-
 }

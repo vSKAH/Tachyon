@@ -5,7 +5,7 @@ import tech.skworks.tachyon.libs.com.google.protobuf.Any;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.player.component.ComponentRegistryImpl;
-import tech.skworks.tachyon.plugin.internal.player.component.ComponentService;
+import tech.skworks.tachyon.plugin.internal.player.component.GrpcComponentService;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.internal.metric.scraper.TachyonMetrics;
 
@@ -28,14 +28,14 @@ public class ProfileManager {
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("ProfileManager");
 
     private final Map<UUID, GrpcTachyonProfile> profiles = new ConcurrentHashMap<>();
-    private final ComponentService componentService;
+    private final GrpcComponentService grpcComponentService;
     private final ComponentRegistryImpl componentRegistryImpl;
 
     @Nullable
     private final TachyonMetrics tachyonMetrics;
 
-    public ProfileManager(ComponentService componentService, ComponentRegistryImpl componentRegistryImpl, @Nullable TachyonMetrics tachyonMetrics) {
-        this.componentService = componentService;
+    public ProfileManager(GrpcComponentService grpcComponentService, ComponentRegistryImpl componentRegistryImpl, @Nullable TachyonMetrics tachyonMetrics) {
+        this.grpcComponentService = grpcComponentService;
         this.componentRegistryImpl = componentRegistryImpl;
         this.tachyonMetrics = tachyonMetrics;
     }
@@ -62,7 +62,7 @@ public class ProfileManager {
     }
 
     public void load(GetPlayerResponse playerResponse, UUID uuid) {
-        GrpcTachyonProfile profile = new GrpcTachyonProfile(uuid, componentService);
+        GrpcTachyonProfile profile = new GrpcTachyonProfile(uuid, grpcComponentService);
 
         int loaded  = 0;
         int skipped = 0;

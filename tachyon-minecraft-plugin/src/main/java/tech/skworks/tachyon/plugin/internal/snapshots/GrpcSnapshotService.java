@@ -1,7 +1,6 @@
 package tech.skworks.tachyon.plugin.internal.snapshots;
 
 import com.github.luben.zstd.Zstd;
-import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.services.SnapshotService;
@@ -17,7 +16,6 @@ import tech.skworks.tachyon.plugin.internal.util.AbstractGrpcService;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 
 import java.util.concurrent.*;
-import java.util.function.Supplier;
 
 /**
  * Project Tachyon
@@ -37,7 +35,8 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
         this.executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("snapshot-vthread-", 1).factory());
     }
 
-    private <T> void handleGrpcExceptions(String actionName, StatusRuntimeException ex, CompletableFuture<T> future) {
+    @Override
+    protected <T> void handleGrpcExceptions(String actionName, StatusRuntimeException ex, CompletableFuture<T> future) {
         final Status.Code code = ex.getStatus().getCode();
         final String description = ex.getStatus().getDescription();
 
@@ -63,34 +62,9 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
         future.completeExceptionally(ex);
     }
 
-    private <T> CompletableFuture<T> asyncCall(String actionName, Supplier<T> grpcCall) {
-        CompletableFuture<T> future = new CompletableFuture<>();
-
-        executor.execute(() -> {
-            try (var _ = startTimer(actionName)) {
-                T result = grpcCall.get();
-                future.complete(result);
-            } catch (StatusRuntimeException ex) {
-                handleGrpcExceptions(actionName, ex, future);
-            } catch (Exception ex) {
-                LOGGER.error(ex, "Client-side execution failure during action '{}'", actionName);
-                recordError(actionName, ex);
-                future.completeExceptionally(ex);
-            }
-        });
-
-        return future.orTimeout(4, TimeUnit.SECONDS);
-    }
-
-    private CompletableFuture<Void> asyncRun(String actionName, Runnable grpcCall) {
-        return asyncCall(actionName, () -> {
-            grpcCall.run();
-            return null;
-        });
-    }
 
     public CompletableFuture<Void> takeDatabaseSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason, @NotNull SnapshotTriggerType triggerType) {
-        return asyncRun("takeDatabaseSnapshot", () -> {
+        return asyncRun(executor, LOGGER, "takeDatabaseSnapshot", () -> {
             TakeDatabaseSnapshotRequest request = TakeDatabaseSnapshotRequest.newBuilder().setPlayerId(playerUniqueId).setReason(reason).setTriggerType(triggerType).build();
             grpcClientManager.getSnapshotStub(3).takeDatabaseSnapshot(request);
         });
@@ -99,7 +73,7 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
     @Override
     public <T extends Message> CompletableFuture<Void> takeComponentSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason,
                                                                              @NotNull final SnapshotTriggerType triggerType, @NotNull final T component) {
-        return asyncRun("takeComponentSnapshot", () -> {
+        return asyncRun(executor, LOGGER, "takeComponentSnapshot", () -> {
             TakeComponentSnapshotRequest request = TakeComponentSnapshotRequest.newBuilder().setPlayerId(playerUniqueId).setReason(reason)
                     .setTriggerType(triggerType).setTargetComponent(component.getDescriptorForType().getFullName())
                     .setRawData(ByteString.copyFrom(Zstd.compress(component.toByteArray()))).build();
@@ -110,7 +84,7 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
 
     @Override
     public CompletableFuture<ToggleLockSnapshotResponse> toggleSnapshotLocking(@NotNull final String snapshotId, @NotNull final String executorUniqueId) {
-        return asyncCall("toggleLockSnapshot", () -> {
+        return asyncCall(executor, LOGGER, "toggleLockSnapshot", () -> {
             ToggleLockSnapshotRequest request = ToggleLockSnapshotRequest.newBuilder().setSnapshotId(snapshotId).setLockerId(executorUniqueId).build();
             return grpcClientManager.getSnapshotStub(3).toggleLockSnapshot(request);
         });
@@ -118,14 +92,14 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
 
     @Override
     public CompletableFuture<ListSnapshotsResponse> getSnapshots(@NotNull final String playerUniqueId) {
-        return asyncCall("getSnapshots", () -> {
+        return asyncCall(executor, LOGGER, "getSnapshots", () -> {
             ListSnapshotsRequest request = ListSnapshotsRequest.newBuilder().setPlayerId(playerUniqueId).build();
             return grpcClientManager.getSnapshotStub(3).listSnapshots(request);
         });
     }
 
     public CompletableFuture<DecodeSnapshotResponse> decodeSnapshot(@NotNull final String snapshotId) {
-        return asyncCall("decodeSnapshot", () -> {
+        return asyncCall(executor, LOGGER, "decodeSnapshot", () -> {
             DecodeSnapshotRequest request = DecodeSnapshotRequest.newBuilder().setSnapshotId(snapshotId).build();
             return grpcClientManager.getSnapshotStub(3).decodeSnapshot(request);
         });

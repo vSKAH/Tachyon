@@ -7,6 +7,7 @@ import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.UUID;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 /**
@@ -18,11 +19,11 @@ import java.util.function.Consumer;
  * @since 1.0.0-SNAPSHOT
  */
 public final class RetryQueue {
-
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("RetryQueue");
 
     private final UUID uuid;
     private final Deque<RetryTask> queue = new ArrayDeque<>();
+    private final ReentrantLock lock = new ReentrantLock();
     private boolean isProcessing = false;
 
     public RetryQueue(UUID uuid) {
@@ -30,12 +31,16 @@ public final class RetryQueue {
     }
 
     public void submit(RetryTask task, Consumer<RetryTask> onExhausted) {
-        synchronized (this) {
+        lock.lock();
+        try {
             queue.add(task);
             if (queue.size() > 1) {
                 LOGGER.info("Task queued for {} ({} ahead): {}", uuid, queue.size() - 1, task.describe());
             }
+        } finally {
+            lock.unlock();
         }
+
         if (Bukkit.isPrimaryThread()) {
             LOGGER.warn("submit() called from Main Thread for {}, offloading to Virtual Thread...", uuid);
             String shortId = uuid.toString().substring(0, 18);
@@ -51,23 +56,32 @@ public final class RetryQueue {
             return;
         }
 
-        synchronized (this) {
+        lock.lock();
+        try {
             if (isProcessing || queue.isEmpty()) return;
             isProcessing = true;
+        } finally {
+            lock.unlock();
         }
 
         try {
             while (true) {
                 RetryTask task;
-                synchronized (this) {
+
+                lock.lock();
+                try {
                     task = queue.peek();
                     if (task == null) return;
                     task.incrementAttempts();
+                } finally {
+                    lock.unlock();
                 }
 
+                // L'exécution se fait HORS verrou pour ne pas bloquer les autres soumissions
                 boolean success = task.execute();
 
-                synchronized (this) {
+                lock.lock();
+                try {
                     if (success) {
                         queue.poll();
                         LOGGER.info("Task executed successfully for {}: {}", uuid, task.describe());
@@ -80,41 +94,60 @@ public final class RetryQueue {
                             onExhausted.accept(task);
                             queue.poll();
                         } else {
+                            // On arrête le traitement de cette queue pour ce cycle en cas d'échec non épuisé
                             return;
                         }
                     }
+
+                    if (queue.isEmpty()) return;
+                } finally {
+                    lock.unlock();
                 }
             }
         } finally {
-            synchronized (this) {
+            lock.lock();
+            try {
                 isProcessing = false;
+            } finally {
+                lock.unlock();
             }
         }
     }
 
     public void drainToDeadLetter(Consumer<RetryTask> onExhausted) {
-        synchronized (this) {
+        lock.lock();
+        try {
             int count = queue.size();
             if (count > 0) {
                 LOGGER.error("Draining {} undeliverable task(s) to dead-letter for {}", count, uuid);
                 while (!queue.isEmpty()) {
                     RetryTask task = queue.poll();
-                    task.onExhausted();
-                    onExhausted.accept(task);
+                    if (task != null) {
+                        task.onExhausted();
+                        onExhausted.accept(task);
+                    }
                 }
             }
+        } finally {
+            lock.unlock();
         }
     }
 
     public boolean isEmpty() {
-        synchronized (this) {
+        lock.lock();
+        try {
             return queue.isEmpty();
+        } finally {
+            lock.unlock();
         }
     }
 
     public int size() {
-        synchronized (this) {
+        lock.lock();
+        try {
             return queue.size();
+        } finally {
+            lock.unlock();
         }
     }
 }

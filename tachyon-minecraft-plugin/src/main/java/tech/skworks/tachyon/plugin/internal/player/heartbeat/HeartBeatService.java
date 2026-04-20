@@ -4,6 +4,7 @@ import org.apache.logging.log4j.Level;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.jspecify.annotations.Nullable;
+import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.GrpcClientManager;
 import tech.skworks.tachyon.plugin.internal.metric.scraper.TachyonMetrics;
@@ -15,6 +16,7 @@ import tech.skworks.tachyon.service.contracts.player.PlayerHeartBeatBatchRequest
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Project Tachyon
@@ -31,6 +33,10 @@ public class HeartBeatService extends AbstractGrpcService {
     public HeartBeatService(@Nullable TachyonMetrics tachyonMetrics, GrpcClientManager grpcClientManager) {
         super(tachyonMetrics, grpcClientManager);
     }
+
+    //TODO: populate handleGrpcExceptions on all classes nseeded
+    @Override
+    protected <T> void handleGrpcExceptions(String actionName, StatusRuntimeException ex, CompletableFuture<T> future) {}
 
     public void unlockPlayerProfile(UUID uuid, String playerName) {
         Thread.ofVirtual().name("tachyon-unlock-", 1).start(() -> {

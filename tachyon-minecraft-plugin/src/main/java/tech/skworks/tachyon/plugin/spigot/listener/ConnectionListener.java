@@ -11,7 +11,7 @@ import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.internal.audit.GrpcAuditService;
 import tech.skworks.tachyon.plugin.internal.player.ProfileManager;
-import tech.skworks.tachyon.plugin.internal.player.component.ComponentService;
+import tech.skworks.tachyon.plugin.internal.player.component.GrpcComponentService;
 import tech.skworks.tachyon.plugin.internal.player.heartbeat.HeartBeatService;
 import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
 import tech.skworks.tachyon.service.contracts.player.GetPlayerResponse;
@@ -29,14 +29,14 @@ import java.util.UUID;
 public class ConnectionListener implements Listener {
     private final ProfileManager profileManager;
     private final GrpcAuditService audit;
-    private final ComponentService componentService;
+    private final GrpcComponentService grpcComponentService;
     private final HeartBeatService heartBeatService;
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("ConnectionListener");
 
-    public ConnectionListener(ProfileManager profileManager, HeartBeatService profileService, GrpcAuditService audit, ComponentService componentService) {
+    public ConnectionListener(ProfileManager profileManager, HeartBeatService profileService, GrpcAuditService audit, GrpcComponentService grpcComponentService) {
         this.profileManager = profileManager;
         this.audit = audit;
-        this.componentService = componentService;
+        this.grpcComponentService = grpcComponentService;
         this.heartBeatService = profileService;
     }
 
@@ -48,7 +48,7 @@ public class ConnectionListener implements Listener {
         LOGGER.info("Processing pre-login for {} ({})", event.getName(), uuid);
 
         try {
-            GetPlayerResponse playerResponse = componentService.loadProfile(uuid);
+            GetPlayerResponse playerResponse = grpcComponentService.loadProfile(uuid);
 
             if (playerResponse == null) {
                 LOGGER.error("Profile load returned null for {} ({}) — kicking.", event.getName(), uuid);
@@ -107,7 +107,7 @@ public class ConnectionListener implements Listener {
                 LOGGER.info("saveProfile() confirmed for {} ({}).", player.getName(), uuid);
             }
 
-            componentService.flushQueueForPlayer(uuid);
+            grpcComponentService.flushQueueForPlayer(uuid);
             profileManager.unloadPlayer(uuid);
             heartBeatService.unlockPlayerProfile(uuid, player.getName());
         });
