@@ -35,7 +35,7 @@ public class CookieCommand implements CommandExecutor {
         }
 
         final UUID playerId = player.getUniqueId();
-        final TachyonProfile profile = tachyon.getProfile(playerId);
+        final TachyonProfile profile = tachyon.getTachyonProfileRegistry().getProfile(playerId);
         if (profile == null) {
             player.sendMessage("§cError: Your profile is not loaded from Tachyon yet.");
             return true;

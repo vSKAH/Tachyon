@@ -8,13 +8,11 @@ import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
+import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
+import tech.skworks.tachyon.api.services.PlayerDataService;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
-import tech.skworks.tachyon.plugin.internal.audit.GrpcAuditService;
-import tech.skworks.tachyon.plugin.internal.player.ProfileManager;
-import tech.skworks.tachyon.plugin.internal.player.component.GrpcComponentService;
-import tech.skworks.tachyon.plugin.internal.player.heartbeat.HeartBeatService;
-import tech.skworks.tachyon.plugin.internal.util.TachyonLogger;
-import tech.skworks.tachyon.service.contracts.player.GetPlayerResponse;
+import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
+import tech.skworks.tachyon.service.contracts.player.data.PullProfileResponse;
 
 import java.util.UUID;
 
@@ -27,17 +25,13 @@ import java.util.UUID;
  * @since 1.0.0-SNAPSHOT
  */
 public class ConnectionListener implements Listener {
-    private final ProfileManager profileManager;
-    private final GrpcAuditService audit;
-    private final GrpcComponentService grpcComponentService;
-    private final HeartBeatService heartBeatService;
+
+    private final TachyonCore plugin;
+
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("ConnectionListener");
 
-    public ConnectionListener(ProfileManager profileManager, HeartBeatService profileService, GrpcAuditService audit, GrpcComponentService grpcComponentService) {
-        this.profileManager = profileManager;
-        this.audit = audit;
-        this.grpcComponentService = grpcComponentService;
-        this.heartBeatService = profileService;
+    public ConnectionListener(TachyonCore plugin) {
+        this.plugin = plugin;
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
@@ -48,7 +42,7 @@ public class ConnectionListener implements Listener {
         LOGGER.info("Processing pre-login for {} ({})", event.getName(), uuid);
 
         try {
-            GetPlayerResponse playerResponse = grpcComponentService.loadProfile(uuid);
+            PullProfileResponse playerResponse = plugin.getPlayerDataService().tryPullProfile(uuid);
 
             if (playerResponse == null) {
                 LOGGER.error("Profile load returned null for {} ({}) — kicking.", event.getName(), uuid);
@@ -56,12 +50,12 @@ public class ConnectionListener implements Listener {
                 return;
             }
 
-            profileManager.load(playerResponse, uuid);
-            audit.log(uuid.toString(), "JOIN", "Player joined server");
+            plugin.getTachyonProfileRegistry().buildProfile(playerResponse, uuid);
+            if (plugin.getPluginConfig().auditConfig().enableLoginLogs())
+                plugin.getAuditService().log(uuid.toString(), "JOIN", "Player joined server");
             LOGGER.info("Pre-login successful for {} ({}).", event.getName(), uuid);
 
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             LOGGER.error(e, "Unexpected error during pre-login for {} ({})", event.getName(), uuid);
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, "§c[Tachyon] An internal error occurred. Please reconnect.");
         }
@@ -69,47 +63,58 @@ public class ConnectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
     public void onLogin(PlayerLoginEvent event) {
-        if (event.getResult() != PlayerLoginEvent.Result.ALLOWED) {
+        final PlayerLoginEvent.Result result = event.getResult();
+        if (result != PlayerLoginEvent.Result.ALLOWED) {
             final Player player = event.getPlayer();
             final UUID uuid = player.getUniqueId();
             final String name = player.getName();
 
-            if (profileManager.isLoaded(uuid)) {
-                LOGGER.warn("Login denied for {} after profile was loaded (result: {}) — releasing state and unloading profile.", uuid, event.getResult());
-                audit.log(uuid.toString(), "KICKED", "Login denied: " + event.getKickMessage());
+            final TachyonProfileRegistry profilesRegistry = plugin.getTachyonProfileRegistry();
 
-                profileManager.unloadPlayer(uuid);
-                heartBeatService.unlockPlayerProfile(uuid, name);
+            if (profilesRegistry.profileIsLoaded(uuid)) {
+                LOGGER.warn("Login denied for {} after profile was loaded (result: {}) — releasing state and unloading profile.", uuid, event.getResult());
+
+                if (plugin.getPluginConfig().auditConfig().enableLoginLogs())
+                    plugin.getAuditService().log(uuid.toString(), "KICKED", "Login denied: " + event.getKickMessage());
+
+                profilesRegistry.unloadProfile(uuid);
+                plugin.getPlayerSessionService().unlockPlayerProfile(uuid, name);
             }
+            return;
         }
+
+
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onQuit(PlayerQuitEvent event) {
         final Player player = event.getPlayer();
-        final UUID   uuid   = player.getUniqueId();
+        final UUID uuid = player.getUniqueId();
+        final TachyonProfileRegistry profilesRegistry = plugin.getTachyonProfileRegistry();
 
-        audit.log(uuid.toString(), "QUIT", "Player left server");
+        if (plugin.getPluginConfig().auditConfig().enableLogoutLogs())
+            plugin.getAuditService().log(uuid.toString(), "QUIT", "Player left server");
 
-        TachyonProfile profile = profileManager.get(uuid);
+        TachyonProfile profile = profilesRegistry.getProfile(uuid);
 
         if (profile == null) {
             LOGGER.error("Profile not found at disconnect for {} ({}) — cannot save.", player.getName(), uuid);
             return;
         }
 
+        final PlayerDataService playerDataService = plugin.getPlayerDataService();
         LOGGER.info("Player {} ({}) disconnecting — saving dirty components...", player.getName(), uuid);
 
-        profile.saveProfile().whenComplete((result, exception) -> {
+        playerDataService.pushProfile(profile).whenComplete((result, exception) -> {
             if (exception != null) {
                 LOGGER.error(exception, "saveProfile() failed for {} ({}) at disconnect — data may be partially saved.", player.getName(), uuid);
             } else {
                 LOGGER.info("saveProfile() confirmed for {} ({}).", player.getName(), uuid);
             }
 
-            grpcComponentService.flushQueueForPlayer(uuid);
-            profileManager.unloadPlayer(uuid);
-            heartBeatService.unlockPlayerProfile(uuid, player.getName());
+            playerDataService.flushQueueForPlayer(uuid);
+            profilesRegistry.unloadProfile(uuid);
+            plugin.getPlayerSessionService().unlockPlayerProfile(uuid, player.getName());
         });
     }
 

@@ -6,7 +6,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import tech.skworks.tachyon.api.TachyonAPI;
-import tech.skworks.tachyon.api.handler.ComponentPreviewHandler;
+import tech.skworks.tachyon.api.component.ComponentPreviewHandler;
 import tech.skworks.tachyon.exampleplugin.components.CookieComponent;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 

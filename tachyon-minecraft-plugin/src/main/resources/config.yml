@@ -2,7 +2,35 @@ server-name: "hello"
 grpc:
   host: "localhost"
   port: 9000
-  log-heartbeats: false
 metrics:
   host: "0.0.0.0"
   port: 9001
+services:
+  audit:
+    buffer:
+      size: 5000
+      flush_delay: 2
+      drain_per_cycle: 200
+    logs:
+      login:
+        enabled: true
+      logout:
+        enabled: true
+  session:
+    heartbeat:
+      send_delay: 5
+      logs: true
+  player-data:
+    recovery:
+      logs:
+        path: "/recovery/playerdata/"
+        name: "recovery.log"
+      binary_folder_path: "/recovery/playerdata/datas"
+    load:
+      attempts:
+        max: 5
+        delay: 500 #ms
+      kick_msg: "§c[Tachyon] Failed to load your data. Please reconnect."
+    auto-save:
+      enabled: true
+      delay: 10 #sec

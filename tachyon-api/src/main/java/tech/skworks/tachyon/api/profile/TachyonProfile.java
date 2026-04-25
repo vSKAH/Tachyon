@@ -4,8 +4,9 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 /**
@@ -78,36 +79,15 @@ public interface TachyonProfile {
      */
     @Nullable <T extends Message> T getComponent(@NotNull final String componentShortName);
 
-    /**
-     * Marks the given component as dirty and immediately enqueues an asynchronous
-     * save operation to the backend via gRPC.
-     *
-     * @param component The component to save immediately.
-     * @param <T>       The specific type of the Protobuf message.
-     * @return A CompletableFuture that completes when the backend acknowledges the save.
-     */
-    <T extends Message> CompletableFuture<Void> saveComponent(@NotNull final T component);
+    <T extends Message> void removeComponent(@NotNull final T componentDefaultInstance);
 
-    /**
-     * Resets or deletes a component from the profile and immediately enqueues an asynchronous
-     * delete operation to the backend via gRPC.
-     *
-     * @param component The component to remove immediately.
-     * @param <T>          The specific type of the Protobuf message.
-     * @return A CompletableFuture that completes when the backend acknowledges the deletion.
-     */
-    <T extends Message> CompletableFuture<Void> deleteComponent(@NotNull final T component);
+    boolean hasPendingChanges();
 
-    /**
-     * Asynchronously flushes all components currently marked as "dirty" to the backend.
-     * <p>
-     * This is typically called during player disconnection or periodic auto-saves
-     * to ensure no data is lost.
-     *
-     * @return A CompletableFuture that completes when all dirty components are saved.
-     */
-    CompletableFuture<Void> saveProfile();
+    @NotNull List<Message> extractDirtyComponents();
 
+    @NotNull List<String> extractDeletedComponentsUrls();
+
+    void markAsClean(@NotNull final Collection<Class<? extends Message>> savedClasses, @NotNull final Collection<String> deletedComponent);
     /**
      * Gets the unique identifier of the player who owns this profile.
      *

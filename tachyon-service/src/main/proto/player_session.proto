@@ -1,0 +1,26 @@
+syntax = "proto3";
+package tech.skworks.tachyon.service.contracts.player.session;
+
+import "google/protobuf/empty.proto";
+
+option java_multiple_files = true;
+option java_package = "tech.skworks.tachyon.service.contracts.player.session";
+
+
+service PlayerSessionService {
+  rpc PlayerHeartBeat       (PlayerHeartBeatRequest)      returns (google.protobuf.Empty);
+  rpc PlayerHeartBeatBatch  (PlayerHeartBeatBatchRequest) returns (google.protobuf.Empty);
+  rpc FreePlayer            (FreePlayerRequest)           returns (google.protobuf.Empty);
+}
+
+message PlayerHeartBeatRequest {
+  string uuid = 1;
+}
+
+message PlayerHeartBeatBatchRequest {
+  repeated string uuids = 1;
+}
+
+message FreePlayerRequest {
+  string uuid = 1;
+}

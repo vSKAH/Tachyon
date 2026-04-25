@@ -97,7 +97,7 @@ public interface SnapshotService {
      * Whether the snapshot is {@code FULL} (JSON parsed) or {@code SPECIFIC_COMPONENT} (Raw Binary),
      * the backend will process it and return a standardized response containing the decoded
      * Protobuf components wrapped in {@link com.google.protobuf.Any} objects, ready to be
-     * processed by the {@link tech.skworks.tachyon.api.registries.ComponentRegistry}.
+     * processed by the {@link tech.skworks.tachyon.api.component.ComponentRegistry}.
      *
      * @param snapshotId The unique MongoDB ObjectId string of the snapshot to retrieve.
      * @return A CompletableFuture containing the decoded snapshot data payload.

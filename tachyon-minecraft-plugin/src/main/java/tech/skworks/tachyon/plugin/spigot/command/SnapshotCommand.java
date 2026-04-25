@@ -53,7 +53,7 @@ public class SnapshotCommand implements TabExecutor {
 
     @Nullable
     private <T extends Message> T fetchComponentByName(@NotNull UUID uuid, @NotNull String componentName) {
-        TachyonProfile profile = tachyonCore.getProfile(uuid);
+        final TachyonProfile profile = tachyonCore.getTachyonProfileRegistry().getProfile(uuid);
         if (profile == null) return null;
         return profile.getComponent(componentName);
     }

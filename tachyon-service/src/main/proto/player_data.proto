@@ -1,0 +1,29 @@
+syntax = "proto3";
+package tech.skworks.tachyon.service.contracts.player.data;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/any.proto";
+
+option java_multiple_files = true;
+option java_package = "tech.skworks.tachyon.service.contracts.player.data";
+
+
+service PlayerDataService {
+  rpc PullProfile (PullProfileRequest) returns (PullProfileResponse);
+  rpc PushProfile (PushProfileRequest) returns (google.protobuf.Empty);
+}
+
+message PullProfileRequest {
+  string uuid = 1;
+}
+
+message PullProfileResponse {
+  string uuid = 1;
+  repeated google.protobuf.Any components = 2;
+}
+
+message PushProfileRequest {
+  string uuid = 1;
+  repeated google.protobuf.Any components_to_save = 2;
+  repeated string components_to_remove = 3;
+}

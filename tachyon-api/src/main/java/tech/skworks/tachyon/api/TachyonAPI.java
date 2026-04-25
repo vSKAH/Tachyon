@@ -1,12 +1,8 @@
 package tech.skworks.tachyon.api;
 
-import org.jetbrains.annotations.Nullable;
-import tech.skworks.tachyon.api.profile.TachyonProfile;
-import tech.skworks.tachyon.api.registries.ComponentRegistry;
-import tech.skworks.tachyon.api.services.AuditService;
-import tech.skworks.tachyon.api.services.SnapshotService;
-
-import java.util.UUID;
+import tech.skworks.tachyon.api.component.ComponentRegistry;
+import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
+import tech.skworks.tachyon.api.services.*;
 
 /**
  * Project Tachyon
@@ -28,17 +24,8 @@ import java.util.UUID;
  */
 public interface TachyonAPI<V> {
 
-    /**
-     * Retrieves the active Tachyon profile for a specific player.
-     * <p>
-     * The profile contains all the live Protobuf components currently loaded in memory
-     * for that player. It should only be queried for players who are currently online.
-     *
-     * @param uuid The unique identifier (UUID) of the player.
-     * @return The player's {@link TachyonProfile}, or {@code null} if the player is offline
-     * or their profile hasn't finished loading into memory yet.
-     */
-    @Nullable TachyonProfile getProfile(UUID uuid);
+    //TODO: add doc
+    TachyonProfileRegistry getTachyonProfileRegistry();
 
     /**
      * Retrieves the central component registry used to manage Protobuf descriptors
@@ -50,6 +37,8 @@ public interface TachyonAPI<V> {
      * @return The active {@link ComponentRegistry} instance.
      */
     ComponentRegistry<V> getComponentRegistry();
+
+    SystemService getSystemService();
 
     /**
      * Retrieves the auditing service used to dispatch player actions and security events
@@ -66,6 +55,10 @@ public interface TachyonAPI<V> {
      * @return The active {@link SnapshotService} instance.
      */
     SnapshotService getSnapshotService();
+
+    PlayerSessionService getPlayerSessionService();
+
+    PlayerDataService getPlayerDataService();
 
     /**
      * Checks if the Tachyon core system is currently in its shutdown phase.
