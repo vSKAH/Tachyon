@@ -258,12 +258,12 @@ class PlayerDataStreamWorker {
     }
 
     /** "type.googleapis.com/tech.skworks.cookies.CookieComponent" → "CookieComponent" */
-    private String toCleanKey(String typeUrl) {
+    public static String toCleanKey(String typeUrl) {
         return typeUrl.substring(typeUrl.lastIndexOf('.') + 1);
     }
 
     /** "type.googleapis.com/tech.skworks.cookies.CookieComponent" → "tech.skworks.cookies.CookieComponent" */
-    private String toShortType(String typeUrl) {
+    public static String toShortType(String typeUrl) {
         return typeUrl.replace("type.googleapis.com/", "");
     }
 }

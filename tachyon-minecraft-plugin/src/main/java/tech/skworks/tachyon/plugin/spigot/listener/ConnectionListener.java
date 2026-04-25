@@ -107,7 +107,7 @@ public class ConnectionListener implements Listener {
 
         playerDataService.pushProfile(profile).whenComplete((result, exception) -> {
             if (exception != null) {
-                LOGGER.error(exception, "saveProfile() failed for {} ({}) at disconnect — data may be partially saved.", player.getName(), uuid);
+                LOGGER.error("saveProfile() failed for {} ({}) at disconnect — data may be partially saved.", player.getName(), uuid);
             } else {
                 LOGGER.info("saveProfile() confirmed for {} ({}).", player.getName(), uuid);
             }

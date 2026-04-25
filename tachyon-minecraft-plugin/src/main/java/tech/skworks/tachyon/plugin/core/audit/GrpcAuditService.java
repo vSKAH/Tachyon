@@ -51,7 +51,7 @@ public class GrpcAuditService extends AbstractGrpcService implements AuditServic
         this.executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("tachyon-audit-flush-vthread-", 1).factory());
 
         this.drainAmountPerCycle = auditConfig.bufferDrainPerCycles();
-        LOGGER.info("AuditManager initialized for server '{}' — buffer capacity: {}, flush interval: {}s.", serverName, auditConfig.bufferSize(), auditConfig.bufferSize());
+        LOGGER.info("AuditManager initialized for server '{}' — buffer capacity: {}, flush interval: {}s.", serverName, auditConfig.bufferSize(), auditConfig.bufferFlushDelay());
     }
 
 

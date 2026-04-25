@@ -12,7 +12,9 @@ import org.jboss.logging.Logger;
 import javax.annotation.Nullable;
 import java.io.File;
 import java.io.FileInputStream;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -160,5 +162,9 @@ public class DynamicProtobufRegistry {
     @Nullable
     public Descriptors.Descriptor findDescriptor(String protoFullName) {
         return this.descriptorsByFullName.get(protoFullName);
+    }
+
+    public Collection<Descriptors.Descriptor> getLoadedDescriptors() {
+        return descriptorsByFullName.values();
     }
 }

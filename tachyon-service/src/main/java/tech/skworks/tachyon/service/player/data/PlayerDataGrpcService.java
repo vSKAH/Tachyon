@@ -152,18 +152,19 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
 
         log.debugf("[PlayerDataGrpcService] saveProfile() called for %s (%d component(s) to saves, %d component(s) to remove).", uuid, request.getComponentsToSaveCount(), request.getComponentsToRemoveCount());
 
-        return Uni.createFrom().deferred(() -> {
-            for (String url : request.getComponentsToRemoveList()) {
-                assertComponentRegistered(url, uuid, "delete");
-            }
-            for (Any any : request.getComponentsToSaveList()) {
-                assertComponentRegistered(any.getTypeUrl(), uuid, "save");
-            }
-            return redisString.setex(dirtyKey, 20, "1")
-                    .chain(() -> redisStream.xadd(config.streamKey(), STREAM_ARGS, Map.of("save_profile_payload", request.toByteArray())))
-                    .invoke(id -> log.infof("[PlayerDataGrpcService] saveProfile() enqueued for %s (stream message id: %s).", uuid, id))
-                    .replaceWith(Empty.getDefaultInstance());
-        })
+
+        try {
+            for (String url : request.getComponentsToRemoveList()) assertComponentRegistered(url, uuid, "delete");
+            for (Any any : request.getComponentsToSaveList()) assertComponentRegistered(any.getTypeUrl(), uuid, "save");
+        } catch (StatusRuntimeException e) {
+            return Uni.createFrom().failure(e);
+        }
+
+
+        return redisString.setex(dirtyKey, 20, "1")
+                .chain(() -> redisStream.xadd(config.streamKey(), STREAM_ARGS, Map.of("save_profile_payload", request.toByteArray())))
+                .invoke(id -> log.infof("[PlayerDataGrpcService] saveProfile() enqueued for %s (stream message id: %s).", uuid, id))
+                .replaceWith(Empty.getDefaultInstance())
                 .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] saveProfile() failed to enqueue for %s — releasing dirty key.", uuid))
                 .onFailure().call(() -> redisKey.del(dirtyKey))
                 .onFailure().transform(e -> {
@@ -238,9 +239,15 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
     }
 
     private void assertComponentRegistered(String typeUrl, String uuid, String action) {
+        typeUrl = PlayerDataStreamWorker.toShortType(typeUrl);
         if (dynamicProtobufRegistry.findDescriptor(typeUrl) == null) {
             log.errorf("Unable to %s component %s for player %s. The component is not registered inside the registry.", action, typeUrl, uuid);
+            log.errorf("Loaded components: ");
+            for (Descriptors.Descriptor loadedDescriptor : dynamicProtobufRegistry.getLoadedDescriptors()) {
+                log.errorf("  - %s",loadedDescriptor.getFullName());
+                log.errorf("  - %s",loadedDescriptor.getName());
 
+            }
             throw Status.INVALID_ARGUMENT
                     .withDescription(String.format("Unable to find the component %s inside the service registry.", typeUrl))
                     .asRuntimeException();
