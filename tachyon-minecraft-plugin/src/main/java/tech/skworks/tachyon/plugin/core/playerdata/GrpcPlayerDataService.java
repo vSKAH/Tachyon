@@ -5,6 +5,7 @@ import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.services.PlayerDataService;
 import tech.skworks.tachyon.libs.com.google.protobuf.Any;
+import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 import tech.skworks.tachyon.libs.io.grpc.Status;
 import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
@@ -111,7 +112,9 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
         final UUID uuid = tachyonProfile.getUuid();
         final String strUuid = uuid.toString();
 
-        final Collection<Any> packed = tachyonProfile.extractDirtyComponents().stream().map(Any::pack).toList();
+        final List<Message> toSave = tachyonProfile.extractDirtyComponents();
+        final Collection<Class<? extends Message>> savedClasses = toSave.stream().<Class<? extends Message>>map(Message::getClass).toList();
+        final Collection<Any> packed = toSave.stream().map(Any::pack).toList();
         final Collection<String> toRemove = tachyonProfile.extractDeletedComponentsUrls();
         final PushProfileRequest request = PushProfileRequest.newBuilder().setUuid(strUuid)
                 .addAllComponentsToSave(packed)
@@ -124,6 +127,8 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
             public boolean execute() {
                 try (var _ = startTimer("SaveProfile")) {
                     backendStubProvider.getPlayerDataStub(4).pushProfile(request);
+
+                    tachyonProfile.markAsClean(savedClasses, toRemove);
                     future.complete(null);
                     return true;
 
