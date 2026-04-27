@@ -259,7 +259,7 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
         if (targetComponent == null) {
             return Uni.createFrom().failure(Status.DATA_LOSS.withDescription("Specific Snapshot is missing the 'target_component' field in database.").asRuntimeException());
         }
-        final Any componentAny = Any.newBuilder().setTypeUrl("type.googleapis.com/" + targetComponent).setValue(ByteString.copyFrom(decompressedBytes)).build();
+        final Any componentAny = Any.newBuilder().setTypeUrl(DynamicProtobufRegistry.rebuildTypeUrl(targetComponent)).setValue(ByteString.copyFrom(decompressedBytes)).build();
         final DecodeSnapshotResponse response = DecodeSnapshotResponse.newBuilder().setSnapshotId(snapshotId).putComponents(targetComponent, componentAny).build();
         return Uni.createFrom().item(response);
     }

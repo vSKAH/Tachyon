@@ -53,7 +53,7 @@ public class ComponentRegistryImpl implements ComponentRegistry<ItemStack> {
     @Nullable
     public Message unpack(Any any) {
 
-        final String fullNameWithoutTypeUrl = stripTypeUrl(any);
+        final String fullNameWithoutTypeUrl = stripTypeURL(any.getTypeUrl());
         final Parser<? extends Message> parser = componentsParsers.get(fullNameWithoutTypeUrl);
 
         if (parser == null) {
@@ -112,12 +112,18 @@ public class ComponentRegistryImpl implements ComponentRegistry<ItemStack> {
         return componentsParsers.size();
     }
 
-
-    public static String addTypeUrl(final @NotNull Message message) {
-        return "type.googleapis.com/" + message.getDescriptorForType().getFullName();
+    public static String stripTypeURL(final @NotNull Message message) {
+        return stripTypeURL(message.getDescriptorForType().getFullName());
     }
 
-    public static String stripTypeUrl(final @NotNull Message message) {
-        return message.getDescriptorForType().getFullName().replace("type.googleapis.com/", "");
+    public static String stripTypeURL(@NotNull final String typeURL) {
+        if (!typeURL.startsWith("type.googleapis.com/")) return typeURL;
+        return typeURL.replace("type.googleapis.com/", "");
     }
+
+    public static String rebuildTypeUrl(@NotNull final String typeURL) {
+        if (typeURL.startsWith("type.googleapis.com/")) return typeURL;
+        return "type.googleapis.com/" + typeURL;
+    }
+
 }

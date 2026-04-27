@@ -4,6 +4,7 @@ import com.google.protobuf.DescriptorProtos;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.util.JsonFormat;
 import io.quarkus.scheduler.Scheduled;
+import io.smallrye.common.constraint.NotNull;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -161,10 +162,20 @@ public class DynamicProtobufRegistry {
 
     @Nullable
     public Descriptors.Descriptor findDescriptor(String protoFullName) {
-        return this.descriptorsByFullName.get(protoFullName);
+        return this.descriptorsByFullName.get(stripTypeURL(protoFullName));
     }
 
     public Collection<Descriptors.Descriptor> getLoadedDescriptors() {
         return descriptorsByFullName.values();
+    }
+
+    public static String stripTypeURL(@NotNull final String typeURL) {
+        if (!typeURL.startsWith("type.googleapis.com/")) return typeURL;
+        return typeURL.replace("type.googleapis.com/", "");
+    }
+
+    public static String rebuildTypeUrl(@NotNull final String typeURL) {
+        if (typeURL.startsWith("type.googleapis.com/")) return typeURL;
+        return "type.googleapis.com/" + typeURL;
     }
 }

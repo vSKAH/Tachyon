@@ -136,20 +136,16 @@ class PlayerDataStreamWorker {
         Document setDocument = new Document();
         Document unsetDocument = new Document();
 
-        //TODO: handle removing
         for (Any any : request.getComponentsToSaveList()) {
-            String fullTypeUrl = any.getTypeUrl();
-            String cleanKey = toCleanKey(fullTypeUrl);
-            String shortType = toShortType(fullTypeUrl);
+            String typeUrl = any.getTypeUrl();
 
             Document docToInsert = new Document(Document.parse(protobufRegistry.getPrinter().print(any)));
-            docToInsert.put("@type", shortType);
-            setDocument.put("components." + cleanKey, docToInsert);
+            docToInsert.put("@type", DynamicProtobufRegistry.stripTypeURL(typeUrl));
+            setDocument.put("components." + toCleanKey(typeUrl), docToInsert);
         }
 
         for (String urlToRemove : request.getComponentsToRemoveList()) {
-            String cleanKey = toCleanKey(urlToRemove);
-            unsetDocument.put("components." + cleanKey, "");
+            unsetDocument.put("components." + toCleanKey(DynamicProtobufRegistry.stripTypeURL(urlToRemove)), "");
         }
 
         if (!setDocument.isEmpty()) {
@@ -257,13 +253,7 @@ class PlayerDataStreamWorker {
         }
     }
 
-    /** "type.googleapis.com/tech.skworks.cookies.CookieComponent" → "CookieComponent" */
     public static String toCleanKey(String typeUrl) {
         return typeUrl.substring(typeUrl.lastIndexOf('.') + 1);
-    }
-
-    /** "type.googleapis.com/tech.skworks.cookies.CookieComponent" → "tech.skworks.cookies.CookieComponent" */
-    public static String toShortType(String typeUrl) {
-        return typeUrl.replace("type.googleapis.com/", "");
     }
 }

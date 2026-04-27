@@ -154,12 +154,13 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
 
 
         try {
-            for (String url : request.getComponentsToRemoveList()) assertComponentRegistered(url, uuid, "delete");
-            for (Any any : request.getComponentsToSaveList()) assertComponentRegistered(any.getTypeUrl(), uuid, "save");
+            for (String url : request.getComponentsToRemoveList())
+                assertComponentRegistered(DynamicProtobufRegistry.rebuildTypeUrl(url), uuid, "delete");
+            for (Any any : request.getComponentsToSaveList())
+                assertComponentRegistered(DynamicProtobufRegistry.stripTypeURL(any.getTypeUrl()), uuid, "save");
         } catch (StatusRuntimeException e) {
             return Uni.createFrom().failure(e);
         }
-
 
         return redisString.setex(dirtyKey, 20, "1")
                 .chain(() -> redisStream.xadd(config.streamKey(), STREAM_ARGS, Map.of("save_profile_payload", request.toByteArray())))
@@ -196,28 +197,30 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
                     int loaded = 0;
                     int skipped = 0;
 
-                    for (String dbKey : components.keySet()) {
-                        Document compDoc = components.get(dbKey, Document.class);
+                    for (String key : components.keySet()) {
+                        Document compDoc = components.get(key, Document.class);
                         if (compDoc == null) continue;
 
-                        String shortType = compDoc.getString("@type");
-                        if (shortType == null) {
-                            log.warnf("[PlayerDataGrpcService] Component '%s' missing '@type' field for player %s — skipped.", dbKey, uuid);
+                        String typeUrl = compDoc.getString("@type");
+                        if (typeUrl == null) {
+                            log.warnf("[PlayerDataGrpcService] Component '%s' missing '@type' field for player %s — skipped.", key, uuid);
                             skipped++;
                             continue;
                         }
 
-                        Document compForJson = new Document(compDoc);
-                        compForJson.put("@type", "type.googleapis.com/" + shortType);
 
-                        Any any = buildAnyFromJson(shortType, compForJson.toJson());
+                        Document compForJson = new Document(compDoc);
+                        compForJson.put("@type", DynamicProtobufRegistry.rebuildTypeUrl(typeUrl));
+
+                        Any any = buildAnyFromJson(typeUrl, compForJson.toJson());
                         if (any != null) {
                             response.addComponents(any);
                             loaded++;
                         } else {
-                            log.warnf("[PlayerDataGrpcService] Unknown proto type '%s' for player %s — is the .desc file loaded?", shortType, uuid);
+                            log.warnf("[PlayerDataGrpcService] Unknown proto type '%s' for player %s — is the .desc file loaded?", typeUrl, uuid);
                             skipped++;
                         }
+
                     }
 
                     log.infof("[PlayerDataGrpcService] MongoDB read for %s: %d component(s) loaded, %d skipped.", uuid, loaded, skipped);
@@ -239,7 +242,6 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
     }
 
     private void assertComponentRegistered(String typeUrl, String uuid, String action) {
-        typeUrl = PlayerDataStreamWorker.toShortType(typeUrl);
         if (dynamicProtobufRegistry.findDescriptor(typeUrl) == null) {
             log.errorf("Unable to %s component %s for player %s. The component is not registered inside the registry.", action, typeUrl, uuid);
             log.errorf("Loaded components: ");
