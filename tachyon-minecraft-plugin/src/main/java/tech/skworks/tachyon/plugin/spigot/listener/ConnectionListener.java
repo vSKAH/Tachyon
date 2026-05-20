@@ -77,7 +77,7 @@ public class ConnectionListener implements Listener {
                 if (plugin.getPluginConfig().auditConfig().enableLoginLogs())
                     plugin.getAuditService().log(uuid.toString(), "KICKED", "Login denied: " + event.getKickMessage());
 
-                profilesRegistry.unloadProfile(uuid);
+                profilesRegistry.unloadProfile(uuid, "LOGIN_DENIED");
                 plugin.getPlayerSessionService().unlockPlayerProfile(uuid, name);
             }
             return;
@@ -113,7 +113,7 @@ public class ConnectionListener implements Listener {
             }
 
             playerDataService.flushQueueForPlayer(uuid);
-            profilesRegistry.unloadProfile(uuid);
+            profilesRegistry.unloadProfile(uuid, "DISCONNECT");
             plugin.getPlayerSessionService().unlockPlayerProfile(uuid, player.getName());
         });
     }

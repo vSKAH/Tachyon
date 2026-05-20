@@ -1,6 +1,7 @@
 package tech.skworks.tachyon.api;
 
 import tech.skworks.tachyon.api.component.ComponentRegistry;
+import tech.skworks.tachyon.api.event.EventBus;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
 import tech.skworks.tachyon.api.services.*;
 
@@ -24,7 +25,15 @@ import tech.skworks.tachyon.api.services.*;
  */
 public interface TachyonAPI<V> {
 
-    //TODO: add doc
+    /**
+     * Retrieves the registry responsible for managing live player profiles.
+     * <p>
+     * Used to access, load, or manipulate active {@link tech.skworks.tachyon.api.profile.TachyonProfile}
+     * instances that are currently cached in the server's memory.
+     * </p>
+     *
+     * @return The active {@link TachyonProfileRegistry} instance.
+     */
     TachyonProfileRegistry getTachyonProfileRegistry();
 
     /**
@@ -38,6 +47,14 @@ public interface TachyonAPI<V> {
      */
     ComponentRegistry<V> getComponentRegistry();
 
+    /**
+     * Retrieves the system service handling core backend connectivity and global states.
+     * <p>
+     * This service manages low-level operations such as back-end ping.
+     * </p>
+     *
+     * @return The active {@link SystemService} instance.
+     */
     SystemService getSystemService();
 
     /**
@@ -56,9 +73,38 @@ public interface TachyonAPI<V> {
      */
     SnapshotService getSnapshotService();
 
+    /**
+     * Retrieves the service responsible for managing active player sessions across the network.
+     * <p>
+     * This service handles keeping sessions alive by sending periodic heartbeats for loaded profiles,
+     * and provides mechanisms to unlock player profiles to prevent stuck sessions or cross-server locks.
+     * </p>
+     *
+     * @return The active {@link PlayerSessionService} instance.
+     */
     PlayerSessionService getPlayerSessionService();
 
+    /**
+     * Retrieves the service dedicated to raw player data manipulation and synchronization.
+     * <p>
+     * This service is utilized to pull profile data from the backend, asynchronously push
+     * profile updates (saves), and aggressively flush pending data queues for specific players.
+     * </p>
+     *
+     * @return The active {@link PlayerDataService} instance.
+     */
     PlayerDataService getPlayerDataService();
+
+    /**
+     * Retrieves the central asynchronous event bus used to dispatch and handle Tachyon events.
+     * <p>
+     * This event bus handles safe listener registration and high-performance, lock-free
+     * execution offloaded to a dedicated asynchronous thread pool.
+     * </p>
+     *
+     * @return The active {@link EventBus} instance.
+     */
+    EventBus getEventBus();
 
     /**
      * Checks if the Tachyon core system is currently in its shutdown phase.

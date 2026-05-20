@@ -7,11 +7,13 @@ import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.TachyonAPI;
+import tech.skworks.tachyon.api.event.EventBus;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
 import tech.skworks.tachyon.api.services.*;
 import tech.skworks.tachyon.plugin.core.audit.GrpcAuditService;
+import tech.skworks.tachyon.plugin.core.event.TachyonEventBusImpl;
 import tech.skworks.tachyon.plugin.core.system.GrpcSystemService;
 import tech.skworks.tachyon.plugin.spigot.command.SnapshotCommand;
 import tech.skworks.tachyon.plugin.spigot.config.TachyonConfig;
@@ -59,6 +61,8 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
     private GrpcPlayerSessionService grpcPlayerSessionService;
     private GrpcSnapshotService grpcSnapshotService;
 
+    private TachyonEventBusImpl eventBusImpl;
+
     private boolean tachyonDisabling;
 
     @Override
@@ -68,6 +72,9 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
         this.logger = new TachyonLogger(super.getLogger().getName(), "TachyonPlugin");
         this.saveDefaultConfig();
         this.config = TachyonConfig.fromFile(getConfig());
+
+        this.eventBusImpl = new TachyonEventBusImpl();
+        this.logger.info("Tachyon EventBus successfully initialized.");
 
         this.metricsService = new MetricsService(config.serverName(), this);
 
@@ -94,6 +101,8 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
         this.grpcPlayerDataService = new GrpcPlayerDataService(backendStubProvider, getDataFolder(), metricsService.getTachyonMetrics());
         this.grpcPlayerSessionService = new GrpcPlayerSessionService(metricsService.getTachyonMetrics(), backendStubProvider, this);
         this.grpcSnapshotService = new GrpcSnapshotService(metricsService.getTachyonMetrics(), backendStubProvider);
+
+        this.logger.info("Grpc Services has been initialized.");
 
         this.metricsService.startMetricsCollection(config.metricsConfig());
 
@@ -133,6 +142,10 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
                 logger.error(e, "Profile saves did not complete within 10s — proceeding with shutdown.");
                 logger.error("Unsaved data may be recovered from the retry queue or dead-letter files.");
             }
+        }
+
+        if (this.eventBusImpl != null) {
+            this.eventBusImpl.shutdown();
         }
 
         if (grpcAuditService != null) grpcAuditService.shutdown();
@@ -202,6 +215,11 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
     @Override
     public PlayerDataService getPlayerDataService() {
         return grpcPlayerDataService;
+    }
+
+    @Override
+    public EventBus<JavaPlugin> getEventBus() {
+        return eventBusImpl;
     }
 
     @Override

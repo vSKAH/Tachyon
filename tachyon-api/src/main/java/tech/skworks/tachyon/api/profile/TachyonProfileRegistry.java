@@ -20,7 +20,9 @@ public interface TachyonProfileRegistry {
     void buildProfile(@NotNull final PullProfileResponse profileResponse, @NotNull final UUID uuid);
 
     boolean profileIsLoaded(@NotNull final UUID uuid);
+    void unloadProfile(@NotNull final UUID uuid, @NotNull final String reason);
     void unloadProfile(@NotNull final UUID uuid);
+
 
     @Nullable TachyonProfile getProfile(@NotNull final UUID uuid);
     @NotNull Collection<TachyonProfile> getProfiles();
