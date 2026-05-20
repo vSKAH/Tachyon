@@ -79,7 +79,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
         this.metricsService = new MetricsService(config.serverName(), this);
 
         this.componentRegistryImpl = new ComponentRegistryImpl();
-        this.tachyonProfileRegistry = new TachyonProfileRegistryImpl(componentRegistryImpl, metricsService.getTachyonMetrics());
+        this.tachyonProfileRegistry = new TachyonProfileRegistryImpl(componentRegistryImpl, metricsService.getTachyonMetrics(), eventBusImpl);
 
         this.backendStubProvider = new BackendStubProvider(config.grpcHost(), config.grpcPort());
         this.systemService = new GrpcSystemService(metricsService.getTachyonMetrics(), backendStubProvider, config.serverName());
