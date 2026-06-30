@@ -32,6 +32,7 @@ public class PlayerSessionGrpcService extends MutinyPlayerSessionServiceGrpc.Pla
     Logger log;
 
     private final ReactiveKeyCommands<String> redisKey;
+    private static final String STATE_KEY = "player:state:";
 
     public PlayerSessionGrpcService(ReactiveRedisDataSource redisDS) {
         this.redisKey = redisDS.key();
@@ -42,7 +43,7 @@ public class PlayerSessionGrpcService extends MutinyPlayerSessionServiceGrpc.Pla
         final String uuid = req.getUuid();
         log.infof("[PlayerDataGrpcService] freePlayer() called for %s — releasing state.", uuid);
 
-        return redisKey.del("player:state:" + uuid)
+        return redisKey.del(STATE_KEY + uuid)
                 .invoke(deleted -> {
                     if (deleted != null && deleted > 0)
                         log.infof("[PlayerDataGrpcService] State key deleted for %s.", uuid);
@@ -62,8 +63,8 @@ public class PlayerSessionGrpcService extends MutinyPlayerSessionServiceGrpc.Pla
         log.debugf("[PlayerDataGrpcService] Heartbeat batch received — renewing TTL for %d player(s).", req.getUuidsCount());
 
         return Multi.createFrom().iterable(req.getUuidsList())
-                .onItem().transform(playerId ->
-                        redisKey.expire("player:state:" + playerId, 30)
+                .onItem().transformToUniAndMerge(playerId ->
+                        redisKey.expire(STATE_KEY + playerId, 30)
                                 .invoke(exists -> {
                                     if (Boolean.FALSE.equals(exists)) {
                                         log.debugf("[PlayerDataGrpcService] Heartbeat: state key missing for %s (may be already FREE).", playerId);

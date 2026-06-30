@@ -24,4 +24,16 @@
         <grpc.version>1.79.0</grpc.version>
     </properties>
 
+    <distributionManagement>
+        <repository>
+            <id>reposilite-releases</id>
+            <url>https://reposilite.skworks.tech/releases</url>
+        </repository>
+
+        <snapshotRepository>
+            <id>reposilite-snapshots</id>
+            <url>https://reposilite.skworks.tech/snapshots</url>
+        </snapshotRepository>
+    </distributionManagement>
+
 </project>
