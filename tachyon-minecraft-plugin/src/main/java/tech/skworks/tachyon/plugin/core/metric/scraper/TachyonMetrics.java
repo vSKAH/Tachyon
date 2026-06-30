@@ -69,7 +69,7 @@ public class TachyonMetrics extends MetricsCollector {
             long totalSize = 0;
             int fileCount = 0;
 
-            try (var stream = Files.newDirectoryStream(recoveryDir.resolve("datas"), "*.bin")) {
+            try (var stream = Files.newDirectoryStream(recoveryDir.resolve("data"), "*.bin")) {
                 for (Path file : stream) {
                     totalSize += Files.size(file);
                     fileCount++;

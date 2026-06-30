@@ -47,17 +47,19 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
     private final ScheduledExecutorService retryScheduler;
     private final ExecutorService vThreadExecutor;
 
-    private final File dataFolder;
+    private final File pluginDataFolder;
 
 
-    public GrpcPlayerDataService(BackendStubProvider backendStubProvider, File dataFolder, @Nullable TachyonMetrics tachyonMetrics) {
+    public GrpcPlayerDataService(BackendStubProvider backendStubProvider, File pluginDataFolder, @Nullable TachyonMetrics tachyonMetrics) {
         super(tachyonMetrics, backendStubProvider);
-        this.dataFolder = dataFolder;
+        this.pluginDataFolder = pluginDataFolder;
+
 
         this.retryScheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("tachyon-playerdata-scheduler").factory());
         this.vThreadExecutor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("tachyon-playerdata-executor-", 1).factory());
 
         this.retryScheduler.scheduleAtFixedRate(this::processRetries, 2000L, 1200L, TimeUnit.MILLISECONDS);
+
     }
 
     @Override
@@ -260,15 +262,16 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
         final String fileName = String.format("%s_%s_%s.bin", fileTimestamp, task.getUuid(), task.describe().replaceAll("[^a-zA-Z0-9]", "_"));
 
         try {
-            final Path recoveryDir = dataFolder.toPath().resolve("recovery");
-            Files.createDirectories(recoveryDir);
+            final Path recoveryDataDir = pluginDataFolder.toPath().resolve("recovery").resolve("data");
+            Files.createDirectories(recoveryDataDir);
 
             final byte[] payload = task.getPayload();
             if (payload != null && payload.length > 0) {
-                Files.write(recoveryDir.resolve("data").resolve(fileName), payload, StandardOpenOption.CREATE);
+                Files.write(recoveryDataDir.resolve(fileName), payload,
+                        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
             }
 
-            final Path logPath = dataFolder.toPath().resolve("recovey.log");
+            final Path logPath = pluginDataFolder.toPath().resolve("recovery").resolve("recovery.log");
             final String logLine = String.format("[%s] FATAL: %s | Data saved to: %s%n", logTimestamp, task.getUuid(), fileName);
             Files.writeString(logPath, logLine, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
 
@@ -279,13 +282,13 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
     }
 
     public boolean hasRecoveryBinary() {
-        final Path datasFolder = dataFolder.toPath().resolve("recovery").resolve("data");
+        final Path datasFolder = pluginDataFolder.toPath().resolve("recovery").resolve("data");
         boolean folderExists = Files.exists(datasFolder) && Files.isDirectory(datasFolder);
         if (!folderExists) return false;
-        try (DirectoryStream<Path> directory = Files.newDirectoryStream(datasFolder, "*bin")) {
-            return !directory.iterator().hasNext();
+        try (DirectoryStream<Path> directory = Files.newDirectoryStream(datasFolder, "*.bin")) {
+            return directory.iterator().hasNext();
         } catch (IOException e) {
-           return false;
+            return false;
         }
     }
 }
