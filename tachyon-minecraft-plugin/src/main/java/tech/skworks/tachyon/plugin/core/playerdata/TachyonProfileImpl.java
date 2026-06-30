@@ -17,9 +17,10 @@ public class TachyonProfileImpl implements TachyonProfile {
 
     private final UUID uuid;
 
-    private final Set<Class<? extends Message>> dirty = ConcurrentHashMap.newKeySet();
-    private final Set<String> deleted = ConcurrentHashMap.newKeySet();
     private final Map<Class<? extends Message>, Message> components = new ConcurrentHashMap<>();
+    private final Map<Class<?>, Long> versions = new ConcurrentHashMap<>();
+    private final Map<Class<?>, Long> sentVersions = new ConcurrentHashMap<>();
+    private final Set<String> deleted = ConcurrentHashMap.newKeySet();
 
     public TachyonProfileImpl(UUID uuid) {
         this.uuid = uuid;
@@ -32,23 +33,20 @@ public class TachyonProfileImpl implements TachyonProfile {
     @Override
     public <T extends Message> void setComponent(@NotNull final T component) {
         components.put(component.getClass(), component);
-        dirty.add(component.getClass());
+        versions.merge(component.getClass(), 1L, Long::sum);
     }
 
     @Override
     @SuppressWarnings("unchecked")
     public <T extends Message, B extends Message.Builder> void updateComponent(@NotNull final Class<T> clazz, @NotNull final Consumer<B> modifier) {
-        T current = (T) components.get(clazz);
-        if (current == null) {
-            LOGGER.warn("updateComponent() called for {} on player {} but component is not loaded.", clazz.getSimpleName(), uuid);
-            return;
+        Message updated = components.computeIfPresent(clazz, (k, current) -> {
+            B builder = (B) current.toBuilder();
+            modifier.accept(builder);
+            return builder.build();
+        });
+        if (updated != null) {
+            versions.merge(clazz, 1L, Long::sum);
         }
-        B builder = (B) current.toBuilder();
-        modifier.accept(builder);
-
-        T updated = (T) builder.build();
-        components.put(clazz, updated);
-        dirty.add(clazz);
     }
 
     @Override
@@ -76,18 +74,30 @@ public class TachyonProfileImpl implements TachyonProfile {
     @Override
     public <T extends Message> void removeComponent(@NotNull final T componentDefaultInstance) {
         components.remove(componentDefaultInstance.getClass());
-        dirty.remove(componentDefaultInstance.getClass());
+        versions.remove(componentDefaultInstance.getClass());
         deleted.add(componentDefaultInstance.getDescriptorForType().getFullName());
     }
 
     @Override
     public boolean hasPendingChanges() {
-        return !dirty.isEmpty() || !deleted.isEmpty();
+        return !versions.isEmpty() || !deleted.isEmpty();
     }
 
     @Override
     public @NotNull List<Message> extractDirtyComponents() {
-        return dirty.stream().map(components::get).filter(Objects::nonNull).toList();
+        final List<Message> result = new ArrayList<>();
+        for (final Map.Entry<Class<?>, Long> entry : versions.entrySet()) {
+            final Class<?> clazz = entry.getKey();
+            final Long version = entry.getValue();
+            final Message component = components.get(clazz);
+            if (component == null) {
+                versions.remove(clazz, version);
+                continue;
+            }
+            sentVersions.put(clazz, version);
+            result.add(component);
+        }
+        return result;
     }
 
     @Override
@@ -97,7 +107,11 @@ public class TachyonProfileImpl implements TachyonProfile {
 
     @Override
     public void markAsClean(@NotNull final Collection<Class<? extends Message>> savedClasses, @NotNull final Collection<String> deletedComponent) {
-        savedClasses.forEach(dirty::remove);
+        for (final Class<? extends Message> clazz : savedClasses) {
+            final Long sentVersion = sentVersions.get(clazz);
+            if (sentVersion == null) continue;
+            versions.remove(clazz, sentVersion);
+        }
         deletedComponent.forEach(deleted::remove);
     }
 

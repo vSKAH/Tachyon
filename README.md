@@ -8,7 +8,7 @@
 [![PaperSpigot](https://img.shields.io/badge/Paper-1.8.8+-yellow.svg?style=flat-square)](https://papermc.io/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-Reactive-47A248.svg?style=flat-square&logo=mongodb)](https://www.mongodb.com/)
 [![gRPC](https://img.shields.io/badge/gRPC-Microservice-244c5a.svg?style=flat-square)](https://grpc.io/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPL_3.0-green.svg?style=flat-square)](LICENSE)
 
 </div>
 

@@ -19,7 +19,7 @@ import java.util.concurrent.*;
 
 /**
  * Project Tachyon
- * Class SnapshotManaer
+ * Class GrpcSnapshotService
  *
  * @author  Jimmy (vSKAH) - 17/04/2026
  * @version 1.0
