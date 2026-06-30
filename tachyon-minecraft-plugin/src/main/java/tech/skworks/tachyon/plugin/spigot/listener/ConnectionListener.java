@@ -10,6 +10,8 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
 import tech.skworks.tachyon.api.services.PlayerDataService;
+import tech.skworks.tachyon.plugin.core.metric.scraper.VanillaMetrics;
+import tech.skworks.tachyon.plugin.core.playerdata.PlayerDataConfig;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 import tech.skworks.tachyon.service.contracts.player.data.PullProfileResponse;
@@ -46,7 +48,7 @@ public class ConnectionListener implements Listener {
 
             if (playerResponse == null) {
                 LOGGER.error("Profile load returned null for {} ({}) — kicking.", event.getName(), uuid);
-                event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, "§c[Tachyon] Failed to load your data. Please reconnect.");
+                event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, plugin.getPluginConfig().playerDataConfig().dataLoadingKickMsg());
                 return;
             }
 
@@ -61,9 +63,12 @@ public class ConnectionListener implements Listener {
         }
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onLogin(PlayerLoginEvent event) {
         final PlayerLoginEvent.Result result = event.getResult();
+        if (!event.getPlayer().hasPlayedBefore())
+            VanillaMetrics.incrementTotalPlayers();
+
         if (result != PlayerLoginEvent.Result.ALLOWED) {
             final Player player = event.getPlayer();
             final UUID uuid = player.getUniqueId();

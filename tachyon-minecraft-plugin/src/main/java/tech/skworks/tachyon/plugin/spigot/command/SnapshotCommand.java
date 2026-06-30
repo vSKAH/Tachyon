@@ -166,7 +166,7 @@ public class SnapshotCommand implements TabExecutor {
             return;
         }
 
-        System.out.println("Component: " + component.toString());
+   //     System.out.println("Component: " + component.toString());
 
 
         sender.sendMessage("§7Initiating component snapshot (" + componentName + ") for " + targetName + "...");

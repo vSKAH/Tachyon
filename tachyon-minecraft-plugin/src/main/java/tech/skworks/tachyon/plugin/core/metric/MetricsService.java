@@ -33,6 +33,12 @@ public class MetricsService {
     }
 
     public void startMetricsCollection(@NotNull MetricsConfig metricsConfig) {
+
+        if (metricsConfig.metricsPort() <= 0) {
+            LOGGER.warn("Unable to start metrics on {}:{}", metricsConfig.metricsHost(), metricsConfig.metricsPort());
+            return;
+        }
+
         try {
             httpServer = new HTTPServer(metricsConfig.metricsHost(), metricsConfig.metricsPort());
             tachyonMetrics.start();
@@ -41,9 +47,11 @@ public class MetricsService {
             LOGGER.info("Metrics collection 'Vanilla' has been started");
             collectionRunning = true;
         } catch (Exception e) {
-            httpServer.close();
-            httpServer = null;
-            LOGGER.error(e, "Unable to start metrics.");
+            if (httpServer != null) {
+                httpServer.close();
+                httpServer = null;
+            }
+            LOGGER.error(e, "Unable to start metrics on {}:{}", metricsConfig.metricsHost(), metricsConfig.metricsPort());
         }
     }
 

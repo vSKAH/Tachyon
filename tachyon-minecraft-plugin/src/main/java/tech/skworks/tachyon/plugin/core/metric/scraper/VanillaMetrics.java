@@ -66,6 +66,8 @@ public class VanillaMetrics extends MetricsCollector {
 
     private static final Counter CONSOLE_LOGS = Counter.build().name("spigot_console_logs_total").help("Compteur d'erreurs et alertes dans la console").labelNames("server_name", "level").register();
 
+    private static long totalPlayers = 0;
+
     public VanillaMetrics(@NotNull String serverName, TachyonCore plugin) {
         super(serverName);
         this.plugin = plugin;
@@ -87,6 +89,7 @@ public class VanillaMetrics extends MetricsCollector {
 
         attachBukkitHandler();
         warmMetrics();
+        totalPlayers = Bukkit.getOfflinePlayers().length;
         this.metricsTask = Bukkit.getScheduler().runTaskTimer(plugin, this::updateMetrics, 100L, 100L);
     }
 
@@ -125,11 +128,10 @@ public class VanillaMetrics extends MetricsCollector {
 
     public void updateMetrics() {
         if (plugin.tachyonCoreDisabling()) return;
-        final int onlinePlayerCount = Bukkit.getOnlinePlayers().size();
-        final int uniquePlayerCount = Bukkit.getOfflinePlayers().length;
 
         final int worldsCount = Bukkit.getWorlds().size();
         final int pluginsCount = Bukkit.getPluginManager().getPlugins().length;
+        final int onlinePlayerCount = Bukkit.getOnlinePlayers().size();
 
         int totalEntities = 0;
         int totalChunks = 0;
@@ -144,7 +146,8 @@ public class VanillaMetrics extends MetricsCollector {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
                 ONLINE_PLAYERS.labels(serverName).set(onlinePlayerCount);
-                TOTAL_PLAYERS.labels(serverName).set(uniquePlayerCount);
+
+                TOTAL_PLAYERS.labels(serverName).set(totalPlayers);
 
                 ENTITIES.labels(serverName, "all_worlds").set(finalEntities);
                 CHUNKS.labels(serverName, "all_worlds").set(finalChunks);
@@ -253,5 +256,9 @@ public class VanillaMetrics extends MetricsCollector {
         if (errorAppender != null) {
             org.bukkit.Bukkit.getLogger().removeHandler(errorAppender);
         }
+    }
+
+    public static void incrementTotalPlayers() {
+        totalPlayers++;
     }
 }

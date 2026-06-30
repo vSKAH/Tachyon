@@ -13,7 +13,9 @@ import org.bukkit.configuration.file.FileConfiguration;
 public record MetricsConfig(String metricsHost, int metricsPort) {
 
     public static MetricsConfig fromFile(FileConfiguration configuration) {
-        return new MetricsConfig(configuration.getString("metrics.host", "0.0.0.0"), configuration.getInt("metrics.port"));
+        return new MetricsConfig(
+                configuration.getString("metrics.host", "0.0.0.0"),
+                configuration.getInt("metrics.port", 9001));
     }
 
 }
