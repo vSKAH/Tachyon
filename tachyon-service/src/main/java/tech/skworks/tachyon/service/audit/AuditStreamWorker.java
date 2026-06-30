@@ -3,6 +3,7 @@ package tech.skworks.tachyon.service.audit;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.stream.ClaimedMessages;
 import io.quarkus.redis.datasource.stream.StreamCommands;
 import io.quarkus.redis.datasource.stream.StreamMessage;
 import io.quarkus.redis.datasource.stream.XReadGroupArgs;
@@ -16,6 +17,7 @@ import org.jboss.logging.Logger;
 import tech.skworks.tachyon.service.contracts.audit.AuditLogEntry;
 import tech.skworks.tachyon.service.contracts.audit.LogEventBatchRequest;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -60,36 +62,51 @@ class AuditStreamWorker {
     @Scheduled(every = "1s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void processAuditStream() {
         try {
-            List<StreamMessage<String, String, byte[]>> messages = redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(100));
+            ClaimedMessages<String, String, byte[]> claimed = redisStream.xautoclaim(config.streamKey(), config.streamGroupName(), config.consumerId(), Duration.ofSeconds(30), "0", 100);
+            processAuditBatch(claimed.getMessages());
 
-            if (messages == null || messages.isEmpty()) return;
-
-            List<Document> docsToInsert = new ArrayList<>();
-            List<String> idsToAck = new ArrayList<>();
-
-            for (StreamMessage<String, String, byte[]> msg : messages) {
-                try {
-                    LogEventBatchRequest batch = LogEventBatchRequest.parseFrom(msg.payload().get("payload"));
-
-                    for (AuditLogEntry logItem : batch.getEntriesList()) {
-                        docsToInsert.add(new Document("uuid", logItem.getUuid()).append("module", logItem.getModule()).append("action", logItem.getAction()).append("details", logItem.getDetails()).append("timestamp", new Date(logItem.getTimestampMs())));
-                    }
-                    idsToAck.add(msg.id());
-                } catch (Exception e) {
-                    log.errorf(e, "Failed to parse audit message %s", msg.id());
-                }
-            }
-
-            if (!docsToInsert.isEmpty()) {
-                auditCollection.insertMany(docsToInsert);
-            }
-
-            if (!idsToAck.isEmpty()) {
-                redisStream.xack(config.streamKey(), config.streamGroupName(), idsToAck.toArray(new String[0]));
-            }
+            List<StreamMessage<String, String, byte[]>> fresh = redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(100));
+            processAuditBatch(fresh);
 
         } catch (Exception e) {
             log.error("Error in AuditStreamWorker loop", e);
+        }
+    }
+
+    private void processAuditBatch(List<StreamMessage<String, String, byte[]>> messages) {
+        if (messages == null || messages.isEmpty()) return;
+
+        List<Document> docsToInsert = new ArrayList<>();
+        List<String> parsedIds = new ArrayList<>();
+        List<String> poisonIds = new ArrayList<>();
+
+        for (StreamMessage<String, String, byte[]> msg : messages) {
+            try {
+                LogEventBatchRequest batch = LogEventBatchRequest.parseFrom(msg.payload().get("payload"));
+
+                for (AuditLogEntry logItem : batch.getEntriesList()) {
+                    docsToInsert.add(new Document("uuid", logItem.getUuid()).append("module", logItem.getModule()).append("action", logItem.getAction()).append("details", logItem.getDetails()).append("timestamp", new Date(logItem.getTimestampMs())));
+                }
+                parsedIds.add(msg.id());
+            } catch (Exception e) {
+                log.errorf(e, "Failed to parse audit message %s — poison, dropping (ACK).", msg.id());
+                poisonIds.add(msg.id());
+            }
+        }
+
+        List<String> idsToAck = new ArrayList<>(poisonIds);
+
+        if (!docsToInsert.isEmpty()) {
+            try {
+                auditCollection.insertMany(docsToInsert);
+                idsToAck.addAll(parsedIds);
+            } catch (Exception e) {
+                log.error("Audit insertMany failed — parsed messages left pending for retry.", e);
+            }
+        }
+
+        if (!idsToAck.isEmpty()) {
+            redisStream.xack(config.streamKey(), config.streamGroupName(), idsToAck.toArray(new String[0]));
         }
     }
 }

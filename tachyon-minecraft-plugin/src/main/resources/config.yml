@@ -21,11 +21,6 @@ services:
       send_delay: 5
       logs: true
   player-data:
-    recovery:
-      logs:
-        path: "/recovery/playerdata/"
-        name: "recovery.log"
-      binary_folder_path: "/recovery/playerdata/datas"
     load:
       attempts:
         max: 5
@@ -34,3 +29,4 @@ services:
     auto-save:
       enabled: true
       delay: 10 #sec
+      max-per-tick: 20 # max profiles flushed per auto-save cycle to avoid spamming the backend (<= 0 = unlimited)

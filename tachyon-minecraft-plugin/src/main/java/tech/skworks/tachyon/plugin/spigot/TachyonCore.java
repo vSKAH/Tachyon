@@ -5,6 +5,7 @@ import org.bukkit.command.TabExecutor;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.TachyonAPI;
 import tech.skworks.tachyon.api.event.EventBus;
@@ -26,6 +27,7 @@ import tech.skworks.tachyon.plugin.core.component.ComponentRegistryImpl;
 import tech.skworks.tachyon.plugin.core.playerdata.TachyonProfileRegistryImpl;
 import tech.skworks.tachyon.plugin.spigot.listener.ConnectionListener;
 import tech.skworks.tachyon.plugin.core.playerdata.GrpcPlayerDataService;
+import tech.skworks.tachyon.plugin.spigot.task.AutoSaveTask;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -62,6 +64,9 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
     private GrpcSnapshotService grpcSnapshotService;
 
     private TachyonEventBusImpl eventBusImpl;
+
+    private BukkitTask autoSaveTask;
+    private AutoSaveTask autoSaveSweep;
 
     private boolean tachyonDisabling;
 
@@ -104,11 +109,16 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
 
         this.logger.info("Grpc Services has been initialized.");
 
+        // Re-inject any dead-letter payloads a previous run left on disk — the backend is healthy now.
+        this.grpcPlayerDataService.replayRecoveryFiles();
+
         this.metricsService.startMetricsCollection(config.metricsConfig());
 
         getServer().getPluginManager().registerEvents(new ConnectionListener(this), this);
         registerCommand("snapshot", new SnapshotCommand(this));
         getServer().getServicesManager().register(TachyonAPI.class, this, this, ServicePriority.Highest);
+
+        scheduleAutoSave();
         this.tachyonDisabling = false;
         this.logger.info("Tachyon Core [{}] initialized.", config.serverName());
     }
@@ -117,6 +127,15 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
     public void onDisable() {
         this.logger.info("Starting graceful shutdown...");
         this.tachyonDisabling = true;
+
+        if (autoSaveTask != null) {
+            autoSaveTask.cancel();
+            autoSaveTask = null;
+        }
+        if (autoSaveSweep != null) {
+            if (autoSaveSweep.isProcessing()) autoSaveSweep.cancel();
+            autoSaveSweep = null;
+        }
 
         if (tachyonProfileRegistry != null) {
             final Collection<TachyonProfile> profiles = new ArrayList<>(tachyonProfileRegistry.getProfiles());
@@ -154,6 +173,43 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
         if (backendStubProvider != null) backendStubProvider.shutdown();
         if (metricsService != null) metricsService.shutdownMetricsCollection();
         logger.info("Tachyon Core disabled safely.");
+    }
+
+    /**
+     * Periodically flushes dirty profiles to the backend so a server crash can lose at most one
+     * auto-save interval of progress instead of the whole session. Wires the previously dead
+     * {@code services.player-data.auto-save} config to a real async repeating task.
+     */
+    private void scheduleAutoSave() {
+        var playerDataConfig = config.playerDataConfig();
+        if (!playerDataConfig.enableDataAutoSave()) {
+            logger.info("Auto-save is disabled — profiles will only be persisted on quit/shutdown.");
+            return;
+        }
+
+        final long intervalTicks = Math.max(1, playerDataConfig.dataAutoSaveDelay()) * 20L;
+        final int maxPerTick = playerDataConfig.dataAutoSaveMaxPerTick();
+        final int batchSize = maxPerTick <= 0 ? Integer.MAX_VALUE : maxPerTick;
+
+        this.autoSaveTask = getServer().getScheduler().runTaskTimer(this, () -> triggerAutoSave(batchSize), intervalTicks, intervalTicks);
+
+        if (maxPerTick <= 0) {
+            logger.info("Auto-save enabled — flushing all dirty profiles every {}s (no per-tick limit).", playerDataConfig.dataAutoSaveDelay());
+        } else {
+            logger.info("Auto-save enabled — flushing dirty profiles every {}s, up to {} per tick.", playerDataConfig.dataAutoSaveDelay(), maxPerTick);
+        }
+    }
+
+    private void triggerAutoSave(final int batchSize) {
+        if (tachyonDisabling || tachyonProfileRegistry == null || grpcPlayerDataService == null) return;
+
+        if (autoSaveSweep != null && autoSaveSweep.isProcessing()) return;
+
+        final AutoSaveTask sweep = new AutoSaveTask(this, batchSize, 20, logger, tachyonProfileRegistry, grpcPlayerDataService);
+        if (!sweep.hasWork()) return;
+
+        this.autoSaveSweep = sweep;
+        sweep.start();
     }
 
     public static TachyonLogger getModuleLogger(@NotNull final String moduleName) {

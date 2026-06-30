@@ -29,6 +29,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import tech.skworks.tachyon.service.contracts.player.data.*;
 import tech.skworks.tachyon.service.infra.DynamicProtobufRegistry;
+import tech.skworks.tachyon.service.infra.RedisKeys;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
 import java.time.Duration;
@@ -84,9 +85,9 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
     @Override
     public Uni<PullProfileResponse> pullProfile(PullProfileRequest request) {
         final String uuid = request.getUuid();
-        final String dirtyKey = "player:dirty:" + uuid;
-        final String stateKey = "player:state:" + uuid;
-        final String cacheKey = "player:cache:" + uuid;
+        final String dirtyKey = RedisKeys.dirty(uuid);
+        final String stateKey = RedisKeys.state(uuid);
+        final String cacheKey = RedisKeys.cache(uuid);
 
         log.debugf("[PlayerDataGrpcService] getPlayer() called for %s.", uuid);
 
@@ -96,7 +97,7 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
                         return Uni.createFrom().failure(Status.CANCELLED.withDescription("DATA_DIRTY: Player data is currently being saved (Player: " + uuid + ")").asRuntimeException());
                     }
 
-                    return redisString.setAndChanged(stateKey, "USED", new SetArgs().nx().ex(30)).chain(acquired -> {
+                    return redisString.setAndChanged(stateKey, "USED", new SetArgs().nx().ex(RedisKeys.STATE_TTL_SECONDS)).chain(acquired -> {
                         if (!acquired) {
                             log.infof("[PlayerDataGrpcService] getPlayer() for %s blocked — ALREADY_LOADED (active on another server).", uuid);
                             return Uni.createFrom().failure(Status.CANCELLED.withDescription("ALREADY_LOADED: Player data is currently active on another server (Player: " + uuid + ")").asRuntimeException());
@@ -114,7 +115,7 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
                             return readFromMongo(uuid)
                                     .chain(response -> {
                                         log.infof("[PlayerDataGrpcService] MongoDB read successful for %s — %d component(s) loaded, caching.", uuid, response.getComponentsCount());
-                                        return redisBytes.setex(cacheKey, 60, response.toByteArray()).replaceWith(response);
+                                        return redisBytes.setex(cacheKey, RedisKeys.CACHE_TTL_SECONDS, response.toByteArray()).replaceWith(response);
                                     })
                                     .onFailure().invoke(() -> log.errorf("[PlayerDataGrpcService] MongoDB read failed for %s — releasing state.", uuid))
                                     .onFailure().call(() -> redisKey.del(stateKey));
@@ -148,7 +149,7 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
     @Override
     public Uni<Empty> pushProfile(PushProfileRequest request) {
         final String uuid = request.getUuid();
-        final String dirtyKey = "player:dirty:" + uuid;
+        final String dirtyKey = RedisKeys.dirty(uuid);
 
         log.debugf("[PlayerDataGrpcService] saveProfile() called for %s (%d component(s) to saves, %d component(s) to remove).", uuid, request.getComponentsToSaveCount(), request.getComponentsToRemoveCount());
 
@@ -162,7 +163,7 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
             return Uni.createFrom().failure(e);
         }
 
-        return redisString.setex(dirtyKey, 20, "1")
+        return redisString.setex(dirtyKey, RedisKeys.DIRTY_TTL_SECONDS, "1")
                 .chain(() -> redisStream.xadd(config.streamKey(), STREAM_ARGS, Map.of("save_profile_payload", request.toByteArray())))
                 .invoke(id -> log.infof("[PlayerDataGrpcService] saveProfile() enqueued for %s (stream message id: %s).", uuid, id))
                 .replaceWith(Empty.getDefaultInstance())

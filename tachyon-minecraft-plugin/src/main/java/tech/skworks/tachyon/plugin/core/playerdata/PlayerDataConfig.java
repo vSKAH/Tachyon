@@ -13,19 +13,12 @@ import org.jetbrains.annotations.NotNull;
  * @since 1.0.0-SNAPSHOT
  */
 public record PlayerDataConfig(
-        String recoveryLogPath, String recoveryLogName,
-        String recoveryBinariesPath,
         int dataLoadingMaxAttempts, int dataLoadingCycleDelay, String dataLoadingKickMsg,
-        boolean enableDataAutoSave, int dataAutoSaveDelay) {
+        boolean enableDataAutoSave, int dataAutoSaveDelay, int dataAutoSaveMaxPerTick) {
 
 
     public static PlayerDataConfig fromFile(@NotNull final FileConfiguration fileConfiguration) {
         ConfigurationSection session = fileConfiguration.getConfigurationSection("services.player-data");
-
-        String logPath = session.getString("recovery.logs.path", "/recovery/playerdata/");
-        String recoveryLogName = session.getString("recovery.logs.name", "recovery.log");
-
-        String binaryFolderPath = session.getString("recovery.binary_folder_path");
 
         int dataLoadingMaxAttempts = session.getInt("load.attempts.max", 5);
         int dataLoadingCycleDelay = session.getInt("load.attempts.delay", 500);
@@ -34,8 +27,9 @@ public record PlayerDataConfig(
 
         boolean enableDataAutoSave = session.getBoolean("auto-save.enabled", true);
         int dataAutoSaveDelay = session.getInt("auto-save.delay", 10);
+        int dataAutoSaveMaxPerTick = session.getInt("auto-save.max-per-tick", 20);
 
-        return new PlayerDataConfig(logPath, recoveryLogName, binaryFolderPath, dataLoadingMaxAttempts, dataLoadingCycleDelay, dataLoadingKickMsg, enableDataAutoSave, dataAutoSaveDelay);
+        return new PlayerDataConfig(dataLoadingMaxAttempts, dataLoadingCycleDelay, dataLoadingKickMsg, enableDataAutoSave, dataAutoSaveDelay, dataAutoSaveMaxPerTick);
     }
 
 

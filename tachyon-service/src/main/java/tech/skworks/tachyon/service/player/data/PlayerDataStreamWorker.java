@@ -11,6 +11,7 @@ import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.UpdateOptions;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.keys.KeyCommands;
+import io.quarkus.redis.datasource.stream.ClaimedMessages;
 import io.quarkus.redis.datasource.stream.StreamCommands;
 import io.quarkus.redis.datasource.stream.StreamMessage;
 import io.quarkus.redis.datasource.stream.XReadGroupArgs;
@@ -25,9 +26,11 @@ import org.jboss.logging.Logger;
 import tech.skworks.tachyon.service.contracts.player.data.PullProfileResponse;
 import tech.skworks.tachyon.service.contracts.player.data.PushProfileRequest;
 import tech.skworks.tachyon.service.infra.DynamicProtobufRegistry;
+import tech.skworks.tachyon.service.infra.RedisKeys;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -76,52 +79,62 @@ class PlayerDataStreamWorker {
     @Scheduled(every = "1s", delay = 3L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void processStream() {
         try {
-            List<StreamMessage<String, String, byte[]>> messages = redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(50));
+            ClaimedMessages<String, String, byte[]> claimed = redisStream.xautoclaim(config.streamKey(), config.streamGroupName(), config.consumerId(), Duration.ofSeconds(30), "0", 50);
+            processAndAck(claimed.getMessages(), "reclaimed");
 
-            if (messages == null || messages.isEmpty()) return;
-
-            log.debugf("[PlayerStreamWorker] Picked up %d message(s) from stream.", messages.size());
-
-            int failed = 0;
-            List<String> messagesToAck = new ArrayList<>();
-
-            for (StreamMessage<String, String, byte[]> msg : messages) {
-                if (processSingleMessage(msg)) messagesToAck.add(msg.id());
-                else failed++;
-            }
-
-            if (!messagesToAck.isEmpty()) {
-                redisStream.xack(config.streamKey(), config.streamGroupName(), messagesToAck.toArray(new String[0]));
-            }
-
-            if (failed > 0)
-                log.warnf("[PlayerStreamWorker] Cycle complete — %d processed, %d failed (will not be ACKed).", messagesToAck.size(), failed);
-            else
-                log.debugf("[PlayerStreamWorker] Cycle complete — %d message(s) processed successfully.", messagesToAck.size());
+            List<StreamMessage<String, String, byte[]>> fresh = redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(50));
+            processAndAck(fresh, "new");
 
         } catch (Exception e) {
             log.error("[PlayerStreamWorker] Fatal error in stream processing loop.", e);
         }
     }
 
+    private void processAndAck(List<StreamMessage<String, String, byte[]>> messages, String origin) {
+        if (messages == null || messages.isEmpty()) return;
+
+        log.debugf("[PlayerStreamWorker] Processing %d %s message(s) from stream.", messages.size(), origin);
+
+        int failed = 0;
+        List<String> messagesToAck = new ArrayList<>();
+
+        for (StreamMessage<String, String, byte[]> msg : messages) {
+            if (processSingleMessage(msg)) messagesToAck.add(msg.id());
+            else failed++;
+        }
+
+        if (!messagesToAck.isEmpty()) {
+            redisStream.xack(config.streamKey(), config.streamGroupName(), messagesToAck.toArray(new String[0]));
+        }
+
+        if (failed > 0)
+            log.warnf("[PlayerStreamWorker] %s cycle — %d ACKed, %d left pending for retry.", origin, messagesToAck.size(), failed);
+        else
+            log.debugf("[PlayerStreamWorker] %s cycle — %d message(s) processed successfully.", origin, messagesToAck.size());
+    }
+
+
     private boolean processSingleMessage(StreamMessage<String, String, byte[]> msg) {
+        byte[] saveProfilePayload = msg.payload().get("save_profile_payload");
+
+        if (saveProfilePayload == null) {
+            log.warnf("[PlayerStreamWorker] Message %s has no recognized payload key — poison, dropping (ACK).", msg.id());
+            return true;
+        }
+
         String uuid = null;
         try {
-            byte[] saveProfilePayload = msg.payload().get("save_profile_payload");
-
-            if (saveProfilePayload == null) {
-                log.warnf("[PlayerStreamWorker] Message %s has no recognized payload key — discarding.", msg.id());
-                return false;
-            }
-
             PushProfileRequest req = PushProfileRequest.parseFrom(saveProfilePayload);
             uuid = req.getUuid();
             handleSaveProfilePayload(req, uuid);
             return true;
+        } catch (InvalidProtocolBufferException e) {
+            log.errorf(e, "[PlayerStreamWorker] Message %s is not a valid PushProfileRequest — poison, dropping (ACK).", msg.id());
+            return true;
         } catch (Exception e) {
-            log.errorf(e, "[PlayerStreamWorker] Failed to process message %s (uuid=%s).", msg.id(), uuid);
+            log.errorf(e, "[PlayerStreamWorker] Transient failure on message %s (uuid=%s) — left pending for retry.", msg.id(), uuid);
             if (uuid != null) {
-                redisKey.del("player:dirty:" + uuid);
+                redisKey.del(RedisKeys.dirty(uuid));
                 log.warnf("[PlayerStreamWorker] Released dirty key for %s after processing error.", uuid);
             }
             return false;
@@ -129,8 +142,7 @@ class PlayerDataStreamWorker {
     }
 
     private void handleSaveProfilePayload(PushProfileRequest request, String uuid) throws InvalidProtocolBufferException {
-        log.debugf("[PlayerStreamWorker] Processing SaveProfile for %s (%d component(s) to saves, %d component(s)) to remove.", uuid,
-                request.getComponentsToSaveCount(), request.getComponentsToRemoveCount());
+        log.debugf("[PlayerStreamWorker] Processing SaveProfile for %s (%d component(s) to saves, %d component(s)) to remove.", uuid, request.getComponentsToSaveCount(), request.getComponentsToRemoveCount());
 
         Document updateOperations = new Document();
         Document setDocument = new Document();
@@ -158,8 +170,7 @@ class PlayerDataStreamWorker {
         if (!updateOperations.isEmpty()) {
             // takeSnapshotIfAllowed(uuid, "AUTO_PROFILE_SAVE");
 
-            playersCollection.updateOne(Filters.eq("uuid", uuid), updateOperations, new UpdateOptions().upsert(true)
-            );
+            playersCollection.updateOne(Filters.eq("uuid", uuid), updateOperations, new UpdateOptions().upsert(true));
             log.infof("[PlayerStreamWorker] SaveProfile written to MongoDB for %s.", uuid);
         } else {
             log.debugf("[PlayerStreamWorker] Empty batch for %s, MongoDB update skipped.", uuid);
@@ -228,12 +239,12 @@ class PlayerDataStreamWorker {
                 }
             }
             byte[] cacheBytes = response.build().toByteArray();
-            redisBytes.setex("player:cache:" + uuid, 60, cacheBytes);
+            redisBytes.setex(RedisKeys.cache(uuid), RedisKeys.CACHE_TTL_SECONDS, cacheBytes);
             log.infof("[PlayerStreamWorker] Cache updated for %s — %d component(s) cached, %d skipped (%d bytes).", uuid, cacheHits, cacheMisses, cacheBytes.length);
         } catch (Exception e) {
             log.errorf(e, "[PlayerStreamWorker] Failed to update cache for %s.", uuid);
         } finally {
-            redisKey.del("player:dirty:" + uuid);
+            redisKey.del(RedisKeys.dirty(uuid));
             log.infof("[PlayerStreamWorker] Dirty key released for %s.", uuid);
         }
     }

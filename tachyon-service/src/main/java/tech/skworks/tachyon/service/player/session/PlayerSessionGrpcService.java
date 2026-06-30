@@ -14,6 +14,7 @@ import tech.skworks.tachyon.service.contracts.player.session.FreePlayerRequest;
 import tech.skworks.tachyon.service.contracts.player.session.MutinyPlayerSessionServiceGrpc;
 import tech.skworks.tachyon.service.contracts.player.session.PlayerHeartBeatBatchRequest;
 import tech.skworks.tachyon.service.contracts.player.session.PlayerHeartBeatRequest;
+import tech.skworks.tachyon.service.infra.RedisKeys;
 
 /**
  * Project Tachyon
@@ -32,7 +33,6 @@ public class PlayerSessionGrpcService extends MutinyPlayerSessionServiceGrpc.Pla
     Logger log;
 
     private final ReactiveKeyCommands<String> redisKey;
-    private static final String STATE_KEY = "player:state:";
 
     public PlayerSessionGrpcService(ReactiveRedisDataSource redisDS) {
         this.redisKey = redisDS.key();
@@ -43,16 +43,14 @@ public class PlayerSessionGrpcService extends MutinyPlayerSessionServiceGrpc.Pla
         final String uuid = req.getUuid();
         log.infof("[PlayerDataGrpcService] freePlayer() called for %s — releasing state.", uuid);
 
-        return redisKey.del(STATE_KEY + uuid)
-                .invoke(deleted -> {
-                    if (deleted != null && deleted > 0)
-                        log.infof("[PlayerDataGrpcService] State key deleted for %s.", uuid);
-                    else
-                        log.debugf("[PlayerDataGrpcService] No state key found to delete for %s (already free).", uuid);
-                })
-                .replaceWith(Empty.getDefaultInstance())
-                .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] freePlayer() failed for %s.", uuid))
-                .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Failed to delete state key in Redis!").asRuntimeException());
+        return redisKey.del(RedisKeys.state(uuid)).invoke(deleted -> {
+            if (deleted != null && deleted > 0) log.infof("[PlayerDataGrpcService] State key deleted for %s.", uuid);
+            else log.debugf("[PlayerDataGrpcService] No state key found to delete for %s (already free).", uuid);
+        }).replaceWith(Empty.getDefaultInstance())
+                .onFailure()
+                .invoke(e -> log.errorf(e, "[PlayerDataGrpcService] freePlayer() failed for %s.", uuid))
+                .onFailure()
+                .transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Failed to delete state key in Redis!").asRuntimeException());
     }
 
 
@@ -62,20 +60,15 @@ public class PlayerSessionGrpcService extends MutinyPlayerSessionServiceGrpc.Pla
 
         log.debugf("[PlayerDataGrpcService] Heartbeat batch received — renewing TTL for %d player(s).", req.getUuidsCount());
 
-        return Multi.createFrom().iterable(req.getUuidsList())
-                .onItem().transformToUniAndMerge(playerId ->
-                        redisKey.expire(STATE_KEY + playerId, 30)
-                                .invoke(exists -> {
-                                    if (Boolean.FALSE.equals(exists)) {
-                                        log.debugf("[PlayerDataGrpcService] Heartbeat: state key missing for %s (may be already FREE).", playerId);
-                                    }
-                                })
-                                .onFailure().recoverWithItem(false)
-                )
-                .collect().asList()
-                .replaceWith(Empty.getDefaultInstance())
-                .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] Heartbeat batch completely failed."))
-                .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Heartbeat batch failed: " + e.getMessage()).asRuntimeException());
+        return Multi.createFrom().iterable(req.getUuidsList()).onItem().transformToUniAndMerge(playerId -> redisKey.expire(RedisKeys.state(playerId), RedisKeys.STATE_TTL_SECONDS).invoke(exists -> {
+            if (Boolean.FALSE.equals(exists)) {
+                log.debugf("[PlayerDataGrpcService] Heartbeat: state key missing for %s (may be already FREE).", playerId);
+            }
+        }).onFailure().recoverWithItem(false)).collect().asList().replaceWith(Empty.getDefaultInstance())
+                .onFailure()
+                .invoke(e -> log.errorf(e, "[PlayerDataGrpcService] Heartbeat batch completely failed."))
+                .onFailure().
+                transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Heartbeat batch failed: " + e.getMessage()).asRuntimeException());
     }
 
     @Override

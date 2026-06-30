@@ -11,6 +11,7 @@ import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.retry.RetryQueue;
 import tech.skworks.tachyon.plugin.core.grpc.AbstractGrpcService;
+import tech.skworks.tachyon.plugin.common.util.RecoveryLayout;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.core.grpc.BackendStubProvider;
 import tech.skworks.tachyon.plugin.core.metric.scraper.TachyonMetrics;
@@ -23,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -262,7 +264,7 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
         final String fileName = String.format("%s_%s_%s.bin", fileTimestamp, task.getUuid(), task.describe().replaceAll("[^a-zA-Z0-9]", "_"));
 
         try {
-            final Path recoveryDataDir = pluginDataFolder.toPath().resolve("recovery").resolve("data");
+            final Path recoveryDataDir = RecoveryLayout.dataDir(pluginDataFolder.toPath());
             Files.createDirectories(recoveryDataDir);
 
             final byte[] payload = task.getPayload();
@@ -271,7 +273,7 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
                         StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
             }
 
-            final Path logPath = pluginDataFolder.toPath().resolve("recovery").resolve("recovery.log");
+            final Path logPath = RecoveryLayout.logFile(pluginDataFolder.toPath());
             final String logLine = String.format("[%s] FATAL: %s | Data saved to: %s%n", logTimestamp, task.getUuid(), fileName);
             Files.writeString(logPath, logLine, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
 
@@ -281,14 +283,107 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
         }
     }
 
+
+    public void replayRecoveryFiles() {
+        final Path dataDir = RecoveryLayout.dataDir(pluginDataFolder.toPath());
+        if (!Files.isDirectory(dataDir)) return;
+
+        final List<Path> binFiles = new ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dataDir, RecoveryLayout.BIN_GLOB)) {
+            stream.forEach(binFiles::add);
+        } catch (IOException e) {
+            LOGGER.error(e, "[RECOVERY] Failed to scan recovery directory — replay skipped.");
+            return;
+        }
+
+        if (binFiles.isEmpty()) return;
+        LOGGER.info("[RECOVERY] Replaying {} pending recovery file(s) to backend.", binFiles.size());
+
+        for (final Path file : binFiles) {
+            replaySingleRecoveryFile(file);
+        }
+    }
+
+    private void replaySingleRecoveryFile(@NotNull final Path file) {
+        final byte[] bytes;
+        final PushProfileRequest request;
+        final UUID uuid;
+        try {
+            bytes = Files.readAllBytes(file);
+            request = PushProfileRequest.parseFrom(bytes);
+            uuid = UUID.fromString(request.getUuid());
+        } catch (Exception e) {
+            LOGGER.error(e, "[RECOVERY] Corrupt recovery file {} — quarantined.", file.getFileName());
+            quarantine(file);
+            return;
+        }
+
+        deleteQuietly(file);
+
+        final int count = request.getComponentsToSaveCount() + request.getComponentsToRemoveCount();
+        createQueue(uuid, new RetryTask(uuid) {
+            @Override
+            public boolean execute() {
+                try (var _ = startTimer("ReplayProfile")) {
+                    backendStubProvider.getPlayerDataStub(4).pushProfile(request);
+                    LOGGER.info("[RECOVERY] Replayed recovery data for {} ({} components).", uuid, count);
+                    return true;
+
+                } catch (StatusRuntimeException e) {
+                    if (e.getStatus().getCode() == Status.Code.INVALID_ARGUMENT) {
+                        LOGGER.error(e, "[RECOVERY] Backend permanently rejected recovery data for {} — discarded.", uuid);
+                        return true;
+                    }
+                    LOGGER.warn("Transient gRPC error replaying recovery for {} ({} components), retrying...", uuid, count);
+                    recordError("ReplayProfile_Transient", e);
+                    return false;
+
+                } catch (Exception e) {
+                    LOGGER.error(e, "[RECOVERY] Unexpected error replaying recovery for {} — discarded.", uuid);
+                    return true;
+                }
+            }
+
+            @Override
+            public byte[] getPayload() {
+                return bytes;
+            }
+
+            @Override
+            public void onExhausted() {
+                LOGGER.error("[RECOVERY] Replay exhausted for {} — re-queued to dead-letter for next boot.", uuid);
+            }
+
+            @Override
+            public String describe() {
+                return "ReplayProfile(" + count + " components)";
+            }
+        });
+    }
+
     public boolean hasRecoveryBinary() {
-        final Path datasFolder = pluginDataFolder.toPath().resolve("recovery").resolve("data");
-        boolean folderExists = Files.exists(datasFolder) && Files.isDirectory(datasFolder);
-        if (!folderExists) return false;
-        try (DirectoryStream<Path> directory = Files.newDirectoryStream(datasFolder, "*.bin")) {
+        final Path datasFolder = RecoveryLayout.dataDir(pluginDataFolder.toPath());
+        if (!Files.isDirectory(datasFolder)) return false;
+        try (DirectoryStream<Path> directory = Files.newDirectoryStream(datasFolder, RecoveryLayout.BIN_GLOB)) {
             return directory.iterator().hasNext();
         } catch (IOException e) {
             return false;
+        }
+    }
+
+    private static void quarantine(@NotNull final Path file) {
+        try {
+            Files.move(file, file.resolveSibling(file.getFileName() + ".corrupt"), StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            LOGGER.error(e, "[RECOVERY] Failed to quarantine {}", file.getFileName());
+        }
+    }
+
+    private static void deleteQuietly(@NotNull final Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException e) {
+            LOGGER.error(e, "[RECOVERY] Failed to delete {}", path.getFileName());
         }
     }
 }

@@ -3,6 +3,8 @@ package tech.skworks.tachyon.service.snapshot;
 import com.github.luben.zstd.Zstd;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.mongodb.client.model.Filters;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.mongodb.reactive.ReactiveMongoClient;
 import io.quarkus.mongodb.reactive.ReactiveMongoCollection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
@@ -23,6 +25,7 @@ import tech.skworks.tachyon.service.contracts.snapshot.TakeDatabaseSnapshotReque
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
@@ -50,6 +53,9 @@ public class SnapshotStreamWorker {
     @Inject
     PlayerConfig playerConfig;
 
+    @Inject
+    MeterRegistry meterRegistry;
+
     @ConfigProperty(name = "quarkus.mongodb.database")
     String dbName;
 
@@ -58,6 +64,7 @@ public class SnapshotStreamWorker {
 
     private ReactiveMongoCollection<Document> snapshotsCollection;
     private ReactiveMongoCollection<Document> playersCollection;
+    private Counter dlqCounter;
 
     public SnapshotStreamWorker(ReactiveRedisDataSource redisDS) {
         this.redisStream = redisDS.stream(String.class, String.class, byte[].class);
@@ -67,22 +74,27 @@ public class SnapshotStreamWorker {
     void init() {
         this.snapshotsCollection = mongo.getDatabase(dbName).getCollection(snapshotConfig.collection());
         this.playersCollection = mongo.getDatabase(dbName).getCollection(playerConfig.collection());
+        this.dlqCounter = meterRegistry.counter("tachyon_snapshot_dlq_total");
         this.log.infof("[SnapshotStreamWorker] Initialized with consumer ID '%s'.", snapshotConfig.consumerId());
     }
 
     @Scheduled(every = "1s", delay = 3L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     Uni<Void> processStream() {
-        return readStream("0")
-                .chain(messages -> {
-                    if (messages == null || messages.isEmpty()) {
-                        return readStream(">");
-                    }
-                    log.infof("[SnapshotStreamWorker] Recovering %d pending messages from PEL.", messages.size());
-                    return Uni.createFrom().item(messages);
-                })
-                .chain(this::processBatch)
+        return reclaimAbandoned()
+                .chain(this::readFresh)
                 .onFailure().invoke(e -> log.error("[SnapshotStreamWorker] Fatal error in stream processing loop.", e))
                 .onFailure().recoverWithNull();
+    }
+
+    private Uni<Void> reclaimAbandoned() {
+        return redisStream.xautoclaim(snapshotConfig.streamKey(), snapshotConfig.streamGroupName(), snapshotConfig.consumerId(),
+                        Duration.ofSeconds(30), "0", 50)
+                .map(ClaimedMessages::getMessages)
+                .chain(this::processBatch);
+    }
+
+    private Uni<Void> readFresh() {
+        return readStream(">").chain(this::processBatch);
     }
 
     private Uni<List<StreamMessage<String, String, byte[]>>> readStream(String lastId) {
@@ -186,7 +198,7 @@ public class SnapshotStreamWorker {
         return playersCollection.find(Filters.eq("uuid", uuid)).collect().first()
                 .chain(playerDoc -> {
                     if (playerDoc == null) {
-                        return Uni.createFrom().failure(new IllegalStateException("Player data not found yet for " + uuid));
+                        return Uni.createFrom().failure(new DeferredSnapshotException(uuid));
                     }
 
                     return Uni.createFrom()
@@ -213,25 +225,47 @@ public class SnapshotStreamWorker {
                 });
     }
 
-    //TODO: add dlq
     private Uni<String> handleFailure(StreamMessage<String, String, byte[]> msg, Throwable err) {
-        log.errorf("[SnapshotStreamWorker] Message %s failed: %s", msg.id(), err.getMessage());
+        final boolean deferred = err instanceof DeferredSnapshotException;
 
+        if (deferred) log.debugf("[SnapshotStreamWorker] Message %s deferred: %s", msg.id(), err.getMessage());
+        else log.errorf("[SnapshotStreamWorker] Message %s failed: %s", msg.id(), err.getMessage());
 
         return redisStream.xpending(snapshotConfig.streamKey(), snapshotConfig.streamGroupName(), StreamRange.of(msg.id(), msg.id()), 1)
                 .chain(pendingList -> {
                     long deliveryCount = pendingList.isEmpty() ? 1L : pendingList.getFirst().getDeliveryCount();
 
-                    if (deliveryCount >= MAX_RETRIES) {
-                        log.errorf("[SnapshotStreamWorker] Message %s reached max retries (%d).", msg.id(), MAX_RETRIES);
+                    if (deliveryCount < MAX_RETRIES) {
+                        log.infof("[SnapshotStreamWorker] Message %s at retry %d/%d — left pending.", msg.id(), deliveryCount, MAX_RETRIES);
+                        return Uni.createFrom().nullItem();
+                    }
+
+                    if (deferred) {
+                        log.warnf("[SnapshotStreamWorker] Message %s skipped after %d attempts — player data never materialized.", msg.id(), deliveryCount);
                         return Uni.createFrom().item(msg.id());
                     }
 
-                    log.infof("[SnapshotStreamWorker] Message %s is at retry %d/%d.", msg.id(), deliveryCount, MAX_RETRIES);
-                    return Uni.createFrom().nullItem();
+                    return moveToDlq(msg);
                 })
                 .onFailure().invoke(e -> log.error("Failed to check pending status", e))
                 .onFailure().recoverWithNull();
+    }
+
+    private Uni<String> moveToDlq(StreamMessage<String, String, byte[]> msg) {
+        return redisStream.xadd(snapshotConfig.dlqStreamKey(), msg.payload())
+                .invoke(dlqId -> {
+                    dlqCounter.increment();
+                    log.errorf("[SnapshotStreamWorker] Message %s reached max retries (%d) — moved to DLQ '%s' (id: %s).",
+                            msg.id(), MAX_RETRIES, snapshotConfig.dlqStreamKey(), dlqId);
+                })
+                .replaceWith(msg.id());
+    }
+
+    /** Marks the "player document does not exist yet" case — an expected, non-poison state. */
+    private static final class DeferredSnapshotException extends RuntimeException {
+        DeferredSnapshotException(String uuid) {
+            super("Player data not found yet for " + uuid);
+        }
     }
 
     private String getString(Map<String, byte[]> payload, String key) {

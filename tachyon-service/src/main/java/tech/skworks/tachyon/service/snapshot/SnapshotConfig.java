@@ -20,6 +20,8 @@ public interface SnapshotConfig {
     @WithDefault("tachyon:snapshot_group") String streamGroupName();
     @WithDefault("tachyon:snapshot_worker_1") String consumerId();
 
+    @WithDefault("tachyon:snapshot_dlq") String dlqStreamKey();
+
 
     @WithDefault("tachyon") String s3Bucket();
 

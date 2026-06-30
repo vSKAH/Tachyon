@@ -7,6 +7,7 @@ import io.prometheus.client.Histogram;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.metrics.MetricsCollector;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
+import tech.skworks.tachyon.plugin.common.util.RecoveryLayout;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 
 import java.nio.file.Files;
@@ -58,9 +59,9 @@ public class TachyonMetrics extends MetricsCollector {
     @Override
     public void updateMetrics() {
         try {
-            Path recoveryDir = datafolder.resolve("recovery");
+            Path dataDir = RecoveryLayout.dataDir(datafolder);
 
-            if (!Files.exists(recoveryDir) || !Files.isDirectory(recoveryDir)) {
+            if (!Files.isDirectory(dataDir)) {
                 RECOVERY_FILE_SIZE.labels(serverName).set(0);
                 RECOVERY_PENDING_FILES.labels(serverName).set(0);
                 return;
@@ -69,7 +70,7 @@ public class TachyonMetrics extends MetricsCollector {
             long totalSize = 0;
             int fileCount = 0;
 
-            try (var stream = Files.newDirectoryStream(recoveryDir.resolve("data"), "*.bin")) {
+            try (var stream = Files.newDirectoryStream(dataDir, RecoveryLayout.BIN_GLOB)) {
                 for (Path file : stream) {
                     totalSize += Files.size(file);
                     fileCount++;
