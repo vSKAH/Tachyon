@@ -5,7 +5,7 @@
     <parent>
         <groupId>tech.sk-works.minecraft</groupId>
         <artifactId>tachyon-parent</artifactId>
-        <version>1.0.0</version>
+        <version>1.0.1</version>
     </parent>
     <artifactId>tachyon-service</artifactId>
     <packaging>quarkus</packaging>
