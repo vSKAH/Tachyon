@@ -32,11 +32,18 @@ public class ComponentRegistryImpl implements ComponentRegistry<ItemStack> {
     private final Map<String, Parser<? extends Message>> componentsParsers = new ConcurrentHashMap<>();
 
 
+    private static final Map<String, Parser<? extends Message>> PARSERS_BY_CLASS_NAME = new ConcurrentHashMap<>();
+
+    public static @Nullable Parser<? extends Message> getParserByClassName(@NotNull String className) {
+        return PARSERS_BY_CLASS_NAME.get(className);
+    }
+
     @Override
     public <T extends Message> void registerComponent(T defaultInstance, @Nullable ComponentPreviewHandler<ItemStack> previewHandler) {
         final String fullName = defaultInstance.getDescriptorForType().getFullName();
         final String shortName = defaultInstance.getDescriptorForType().getName();
         componentsParsers.put(fullName, defaultInstance.getParserForType());
+        PARSERS_BY_CLASS_NAME.put(defaultInstance.getClass().getName(), defaultInstance.getParserForType());
         componentsNames.put(fullName, shortName);
         LOGGER.info("Registered component type: {}", fullName);
         if (previewHandler != null) {
