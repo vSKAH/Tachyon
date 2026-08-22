@@ -76,17 +76,22 @@ class PlayerDataStreamWorker {
         this.log.infof("[PlayerStreamWorker] Initialized with consumer ID '%s' on stream '%s'.", config.consumerId(), config.streamKey());
     }
 
-    @Scheduled(every = "1s", delay = 3L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    @Scheduled(every = "PT0.2S", delay = 3L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void processStream() {
         try {
-            ClaimedMessages<String, String, byte[]> claimed = redisStream.xautoclaim(config.streamKey(), config.streamGroupName(), config.consumerId(), Duration.ofSeconds(30), "0", 50);
+            ClaimedMessages<String, String, byte[]> claimed = redisStream.xautoclaim(config.streamKey(), config.streamGroupName(), config.consumerId(), Duration.ofSeconds(30), "0", 100);
             processAndAck(claimed.getMessages(), "reclaimed");
 
-            List<StreamMessage<String, String, byte[]>> fresh = redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(50));
-            processAndAck(fresh, "new");
+            List<StreamMessage<String, String, byte[]>> fresh;
+            do {
+                fresh = redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(200));
+                if (fresh != null && !fresh.isEmpty()) {
+                    processAndAck(fresh, "new");
+                }
+            } while (fresh != null && fresh.size() >= 200);
 
         } catch (Exception e) {
-            log.error("[PlayerStreamWorker] Fatal error in stream processing loop.", e);
+            log.error("[PlayerStreamWorker] Error in stream processing loop.", e);
         }
     }
 

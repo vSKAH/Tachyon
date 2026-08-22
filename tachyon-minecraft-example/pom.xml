@@ -65,6 +65,7 @@
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}
                     </protocArtifact>
+                    <clearOutputDirectory>false</clearOutputDirectory>
                     <writeDescriptorSet>true</writeDescriptorSet>
                     <includeDependenciesInDescriptorSet>true</includeDependenciesInDescriptorSet>
                     <descriptorSetFileName>tachyon-cookies.desc</descriptorSetFileName>
