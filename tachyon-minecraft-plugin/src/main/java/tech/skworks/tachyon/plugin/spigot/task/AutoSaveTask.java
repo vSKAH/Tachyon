@@ -1,6 +1,5 @@
 package tech.skworks.tachyon.plugin.spigot.task;
 
-import org.bukkit.plugin.java.JavaPlugin;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
@@ -21,50 +20,53 @@ import java.util.List;
  * @version 1.0
  * @since 1.0.0-SNAPSHOT
  */
-public class AutoSaveTask extends ChunkedTask {
+public class AutoSaveTask implements Runnable {
 
     private final TachyonLogger logger;
     private final GrpcPlayerDataService grpcPlayerDataService;
-    private final List<TachyonProfile> dirtyProfiles;
+    private final TachyonProfileRegistry tachyonProfileRegistry;
+    private boolean processing = false;
 
-    public AutoSaveTask(JavaPlugin plugin, int processAmount, int waitPeriodTicks,
-                        TachyonLogger logger, TachyonProfileRegistry tachyonProfileRegistry,
+    public AutoSaveTask(TachyonLogger logger, TachyonProfileRegistry tachyonProfileRegistry,
                         GrpcPlayerDataService grpcPlayerDataService) {
-        super(processAmount, waitPeriodTicks, plugin);
         this.logger = logger;
+        this.tachyonProfileRegistry = tachyonProfileRegistry;
         this.grpcPlayerDataService = grpcPlayerDataService;
 
-        this.dirtyProfiles = tachyonProfileRegistry.getProfiles().stream()
+    }
+
+
+    @Override
+    public void run() {
+
+
+        if (processing) return;
+
+        processing = true;
+        List<TachyonProfile> dirtyProfiles = tachyonProfileRegistry.getProfiles().stream()
                 .filter(TachyonProfile::hasPendingChanges)
                 .toList();
 
-        setLogActions(false);
-    }
 
-    public boolean hasWork() {
-        return !dirtyProfiles.isEmpty();
-    }
+        if (dirtyProfiles.isEmpty()) {
+            processing = false;
+            return;
+        }
 
-    @Override
-    protected boolean canContinue(int index) {
-        return index < dirtyProfiles.size();
-    }
 
-    @Override
-    protected void onProcess(int index) {
-        final TachyonProfile profile = dirtyProfiles.get(index);
+        for (int index = 0; index < dirtyProfiles.size(); index++) {
+            final TachyonProfile profile = dirtyProfiles.get(index);
 
-        if (!profile.hasPendingChanges()) return;
+            if (!profile.hasPendingChanges()) continue;
 
-        grpcPlayerDataService.pushProfile(profile)
-                .exceptionally(ex -> {
-                    logger.error("Auto-save failed for {}: {}", profile.getUuid(), ex.getMessage());
-                    return null;
-                });
-    }
+            grpcPlayerDataService.pushProfile(profile)
+                    .exceptionally(ex -> {
+                        logger.error("Auto-save failed for {}: {}", profile.getUuid(), ex.getMessage());
+                        return null;
+                    });
+        }
 
-    @Override
-    protected String getLabel() {
-        return "profile(s)";
+        processing = false;
+
     }
 }

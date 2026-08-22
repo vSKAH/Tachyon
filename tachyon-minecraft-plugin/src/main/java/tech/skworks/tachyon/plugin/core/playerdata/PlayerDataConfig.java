@@ -14,7 +14,7 @@ import org.jetbrains.annotations.NotNull;
  */
 public record PlayerDataConfig(
         int dataLoadingMaxAttempts, int dataLoadingCycleDelay, String dataLoadingKickMsg,
-        boolean enableDataAutoSave, int dataAutoSaveDelay, int dataAutoSaveMaxPerTick) {
+        boolean enableDataAutoSave, int dataAutoSaveDelay) {
 
 
     public static PlayerDataConfig fromFile(@NotNull final FileConfiguration fileConfiguration) {
@@ -27,9 +27,8 @@ public record PlayerDataConfig(
 
         boolean enableDataAutoSave = session.getBoolean("auto-save.enabled", true);
         int dataAutoSaveDelay = session.getInt("auto-save.delay", 10);
-        int dataAutoSaveMaxPerTick = session.getInt("auto-save.max-per-tick", 20);
 
-        return new PlayerDataConfig(dataLoadingMaxAttempts, dataLoadingCycleDelay, dataLoadingKickMsg, enableDataAutoSave, dataAutoSaveDelay, dataAutoSaveMaxPerTick);
+        return new PlayerDataConfig(dataLoadingMaxAttempts, dataLoadingCycleDelay, dataLoadingKickMsg, enableDataAutoSave, dataAutoSaveDelay);
     }
 
 
