@@ -2,98 +2,61 @@ package tech.skworks.tachyon.plugin.core.playerdata;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import tech.skworks.tachyon.api.component.ComponentCodec;
+import tech.skworks.tachyon.api.component.ComponentNamespace;
+import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
-import tech.skworks.tachyon.libs.com.google.protobuf.Message;
-import tech.skworks.tachyon.libs.com.google.protobuf.Parser;
-import tech.skworks.tachyon.plugin.core.component.ComponentRegistryImpl;
-import tech.skworks.tachyon.plugin.spigot.TachyonCore;
+import tech.skworks.tachyon.libs.org.bson.BsonDocument;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
+import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
 public class TachyonProfileImpl implements TachyonProfile {
 
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("PlayerProfile");
 
     private final UUID uuid;
+    private final ComponentRegistry registry;
 
-    private final Map<String, Message> components = new ConcurrentHashMap<>();
-    private final Map<String, Long> versions = new ConcurrentHashMap<>();
-    private final Map<String, Long> sentVersions = new ConcurrentHashMap<>();
-    private final Set<String> deleted = ConcurrentHashMap.newKeySet();
+    private final Map<Class<? extends Record>, Record> components = new ConcurrentHashMap<>();
+    private final Set<Class<? extends Record>> deleted = ConcurrentHashMap.newKeySet();
 
-    public TachyonProfileImpl(UUID uuid) {
+    private final Map<Class<? extends Record>, Long> versions = new ConcurrentHashMap<>();
+    private final Map<Class<? extends Record>, Long> sentVersions = new ConcurrentHashMap<>();
+
+    public TachyonProfileImpl(UUID uuid, ComponentRegistry registry) {
         this.uuid = uuid;
+        this.registry = registry;
     }
 
-    public <T extends Message> void initComponent(@NotNull final T component) {
-        components.put(component.getClass().getName(), component);
-    }
-
-    @Override
-    public <T extends Message> void setComponent(@NotNull final T component) {
-        components.put(component.getClass().getName(), component);
-        versions.merge(component.getClass().getName(), 1L, Long::sum);
+    public <T extends Record> void initComponent(@NotNull final T component) {
+        components.put(component.getClass(), component);
+        versions.put(component.getClass(), 1L);
+        sentVersions.put(component.getClass(), 1L);
     }
 
     @Override
-    @SuppressWarnings("unchecked")
-    public <T extends Message, B extends Message.Builder> void updateComponent(@NotNull final Class<T> clazz, @NotNull final Consumer<B> modifier) {
-        Message updated = components.computeIfPresent(clazz.getName(), (k, current) -> {
-            Message migrated = current;
-            if (current.getClass() != clazz) {
-                try {
-                    final Parser<? extends Message> parser = ComponentRegistryImpl.getParserByClassName(clazz.getName());
-                    if (parser != null) {
-                        migrated = parser.parseFrom(current.toByteArray());
-                    }
-                } catch (Exception e) {
-                    LOGGER.error(e, "Failed to migrate component {} during updateComponent", clazz.getName());
-                }
-            }
-            B builder = (B) migrated.toBuilder();
-            modifier.accept(builder);
-            return builder.build();
+    public <T extends Record> void setComponent(@NotNull T component) {
+        components.put(component.getClass(), component);
+        versions.merge(component.getClass(), 1L, Long::sum);
+    }
+
+    @Override
+    public <T extends Record> void updateComponent(@NotNull final Class<T> clazz, @NotNull final UnaryOperator<T> modifier) {
+        Record updated = components.computeIfPresent(clazz, (k, current) -> {
+            T typed = clazz.cast(current);
+            return modifier.apply(typed);
         });
         if (updated != null) {
-            versions.merge(clazz.getName(), 1L, Long::sum);
+            versions.merge(clazz, 1L, Long::sum);
         }
     }
 
     @Override
-    @SuppressWarnings("unchecked")
-    public @Nullable <T extends Message> T getComponent(@NotNull final Class<T> clazz) {
-        final Message component = components.get(clazz.getName());
-        if (component == null) {
-            return null;
-        }
-        if (component.getClass() == clazz) {
-            return (T) component;
-        }
-        try {
-            final Parser<? extends Message> parser = ComponentRegistryImpl.getParserByClassName(clazz.getName());
-            if (parser != null) {
-                final Message newInstance = parser.parseFrom(component.toByteArray());
-                components.put(clazz.getName(), newInstance);
-                return (T) newInstance;
-            }
-        } catch (Exception e) {
-            LOGGER.error(e, "Failed to migrate component {} to new classloader", clazz.getName());
-        }
-        return null;
-    }
-
-    @SuppressWarnings("unchecked")
-    public @Nullable <T extends Message> T getComponent(@NotNull final String componentShortName) {
-        Collection<Message> copy = List.copyOf(components.values());
-        return (T) copy.stream().filter(component -> component.getDescriptorForType().getName().equals(componentShortName)).findFirst().orElse(null);
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public <T extends Message> T getComponent(@NotNull final Class<T> clazz, @NotNull final T defaultValue) {
+    public <T extends Record> T getComponent(@NotNull final Class<T> clazz, @NotNull final T defaultValue) {
         T value = getComponent(clazz);
         if (value != null) {
             return value;
@@ -103,47 +66,100 @@ public class TachyonProfileImpl implements TachyonProfile {
     }
 
     @Override
-    public <T extends Message> void removeComponent(@NotNull final T componentDefaultInstance) {
-        components.remove(componentDefaultInstance.getClass().getName());
-        versions.remove(componentDefaultInstance.getClass().getName());
-        deleted.add(componentDefaultInstance.getDescriptorForType().getFullName());
+    @SuppressWarnings("unchecked")
+    public @Nullable <T extends Record> T getComponent(@NotNull final Class<T> clazz) {
+        Record component = components.get(clazz);
+        if (component == null) return null;
+        if (clazz.isInstance(component)) {
+            return (T) component;
+        }
+        return null;
+    }
+
+    @Override
+    public <T extends Record> void removeComponent(@NotNull Class<T> clazz) {
+        components.remove(clazz);
+        versions.remove(clazz);
+        sentVersions.remove(clazz);
+        deleted.add(clazz);
     }
 
     @Override
     public boolean hasPendingChanges() {
-        return !versions.isEmpty() || !deleted.isEmpty();
+        if (!deleted.isEmpty()) return true;
+        for (Map.Entry<Class<? extends Record>, Long> entry : versions.entrySet()) {
+            Long lastSent = sentVersions.get(entry.getKey());
+            if (!Objects.equals(entry.getValue(), lastSent)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
-    public @NotNull List<Message> extractDirtyComponents() {
-        final List<Message> result = new ArrayList<>();
-        for (final Map.Entry<String, Long> entry : versions.entrySet()) {
-            final String className = entry.getKey();
-            final Long version = entry.getValue();
-            final Message component = components.get(className);
-            if (component == null) {
-                versions.remove(className, version);
+    public @NotNull Map<ComponentNamespace, BsonDocument> extractDirtyComponents() {
+        Map<ComponentNamespace, BsonDocument> dirtyMap = new HashMap<>();
+
+        for (final Map.Entry<Class<? extends Record>, Long> entry : versions.entrySet()) {
+            final Class<? extends Record> clazz = entry.getKey();
+            final Long currentVersion = entry.getValue();
+            final Long lastSentVersion = sentVersions.get(clazz);
+
+            if (Objects.equals(currentVersion, lastSentVersion)) {
                 continue;
             }
-            sentVersions.put(className, version);
-            result.add(component);
+
+            final Record component = components.get(clazz);
+            if (component == null) {
+                versions.remove(clazz, currentVersion);
+                continue;
+            }
+
+            ComponentCodec<?> codec = registry.getCodec(clazz);
+            if (codec == null) {
+                LOGGER.warn("'extractDirtyComponents' No codec found for component {} ", clazz.getName());
+                continue;
+            }
+
+            BsonDocument encoded = encodeUnchecked(codec, component);
+            dirtyMap.put(codec.getComponentNamespace(), encoded);
+            sentVersions.put(clazz, currentVersion);
         }
-        return result;
+        return dirtyMap;
+    }
+
+    @SuppressWarnings("unchecked")
+    private <R extends Record> BsonDocument encodeUnchecked(ComponentCodec<R> codec, Record instance) {
+        return codec.encode((R) instance);
     }
 
     @Override
-    public @NotNull List<String> extractDeletedComponentsUrls() {
-        return List.copyOf(deleted);
+    public @NotNull List<ComponentNamespace> extractDeletedComponents() {
+        List<ComponentNamespace> list = new ArrayList<>();
+        for (Class<? extends Record> clazz : deleted) {
+            ComponentCodec<?> codec = registry.getCodec(clazz);
+            if (codec == null) {
+                LOGGER.warn("'extractDeletedComponents' No codec found for component {} ", clazz.getName());
+                continue;
+            }
+            list.add(codec.getComponentNamespace());
+        }
+        return list;
     }
 
     @Override
-    public void markAsClean(@NotNull final Collection<Class<? extends Message>> savedClasses, @NotNull final Collection<String> deletedComponent) {
-        for (final Class<? extends Message> clazz : savedClasses) {
-            final Long sentVersion = sentVersions.get(clazz.getName());
-            if (sentVersion == null) continue;
-            versions.remove(clazz.getName(), sentVersion);
+    public void markAsClean(@NotNull final Collection<Class<? extends Record>> savedClasses, @NotNull final Collection<ComponentNamespace> deletedNames) {
+        for (ComponentNamespace deletedName : deletedNames) {
+
+            ComponentCodec<?> codec = registry.getCodec(deletedName);
+            if (codec == null) {
+                LOGGER.warn("'markAsClean' No codec found for component {} ", deletedName);
+                continue;
+            }
+
+            deleted.remove(codec.getComponentClass());
         }
-        deletedComponent.forEach(deleted::remove);
+
     }
 
     @Override

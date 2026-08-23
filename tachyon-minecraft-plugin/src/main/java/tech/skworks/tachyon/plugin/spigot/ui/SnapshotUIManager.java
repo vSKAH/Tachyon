@@ -1,7 +1,6 @@
 package tech.skworks.tachyon.plugin.spigot.ui;
 
 import dev.triumphteam.gui.builder.item.ItemBuilder;
-import dev.triumphteam.gui.guis.BaseGui;
 import dev.triumphteam.gui.guis.Gui;
 import dev.triumphteam.gui.guis.GuiItem;
 import dev.triumphteam.gui.guis.PaginatedGui;
@@ -12,13 +11,9 @@ import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.ClickType;
-import org.bukkit.inventory.ItemStack;
-import tech.skworks.tachyon.api.component.ComponentPreviewHandler;
-import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.api.services.SnapshotService;
 import tech.skworks.tachyon.service.contracts.snapshot.SnapshotInfo;
 import tech.skworks.tachyon.libs.com.google.protobuf.Any;
-import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 
 import java.time.Instant;
@@ -165,13 +160,13 @@ public class SnapshotUIManager {
 
             Bukkit.getScheduler().runTask(plugin, () -> {
                 if (granularity.equalsIgnoreCase("FULL")) {
-                    openFullSnapshotSubMenu(plugin, player, response.getComponentsMap(), onBack);
+                //    openFullSnapshotSubMenu(plugin, player, response.getComponentsMap(), onBack);
                     return;
                 }
 
                 if (response.getComponentsCount() > 0) {
-                    Map.Entry<String, Any> entry = response.getComponentsMap().entrySet().iterator().next();
-                    openComponentGui(plugin, player, entry.getKey(), entry.getValue(), onBack);
+                //    Map.Entry<String, Any> entry = response.getComponentsMap().entrySet().iterator().next();
+                 //   openComponentGui(plugin, player, entry.getKey(), entry.getValue(), onBack);
                 } else {
                     player.sendMessage("§cThis snapshot contains no data.");
                     onBack.run();
@@ -180,7 +175,7 @@ public class SnapshotUIManager {
         });
     }
 
-    private static void openFullSnapshotSubMenu(TachyonCore plugin, Player player, Map<String, Any> componentsMap, Runnable onBack) {
+    /*private static void openFullSnapshotSubMenu(TachyonCore plugin, Player player, Map<String, Any> componentsMap, Runnable onBack) {
         ComponentRegistry<ItemStack> registry = plugin.getComponentRegistry();
 
         PaginatedGui gui = Gui.paginated().title(Component.text("§8Select Component to Preview")).rows(6).pageSize(45).disableAllInteractions().create();
@@ -213,7 +208,7 @@ public class SnapshotUIManager {
     }
 
     private static void openComponentGui(TachyonCore plugin, Player player, String componentFullName, Any componentData, Runnable onBack) {
-        ComponentRegistry<ItemStack> registry = plugin.getComponentRegistry();
+        ComponentRegistry registry = plugin.getComponentRegistry();
         final Message message = registry.unpack(componentData);
 
         if (message == null) {
@@ -257,4 +252,6 @@ public class SnapshotUIManager {
         baseGui.setItem(6, 5, ItemBuilder.from(Material.PAPER).name(Component.text("§cGo Back")).asGuiItem(_ -> onBack.run()));
         baseGui.open(player);
     }
+
+     */
 }

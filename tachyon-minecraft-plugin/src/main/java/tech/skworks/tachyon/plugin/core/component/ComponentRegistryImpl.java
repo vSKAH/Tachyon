@@ -1,18 +1,15 @@
 package tech.skworks.tachyon.plugin.core.component;
 
-import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import tech.skworks.tachyon.api.component.ComponentCodec;
+import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.component.ComponentPreviewHandler;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
-import tech.skworks.tachyon.libs.com.google.protobuf.Any;
-import tech.skworks.tachyon.libs.com.google.protobuf.Message;
-import tech.skworks.tachyon.libs.com.google.protobuf.Parser;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -23,114 +20,57 @@ import java.util.concurrent.ConcurrentHashMap;
  * @version 1.0
  * @since 1.0.0-SNAPSHOT
  */
-public class ComponentRegistryImpl implements ComponentRegistry<ItemStack> {
+public class ComponentRegistryImpl implements ComponentRegistry {
 
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("ComponentRegistry");
 
-    private final Map<String, String> componentsNames = new ConcurrentHashMap<>();
-    private final Map<String, ComponentPreviewHandler<ItemStack>> componentsPreviewHandlers = new ConcurrentHashMap<>();
-    private final Map<String, Parser<? extends Message>> componentsParsers = new ConcurrentHashMap<>();
+    private final Map<ComponentNamespace, ComponentCodec<? extends Record>> codecsByNamespace = new ConcurrentHashMap<>();
+    private final Map<Class<? extends Record>, ComponentCodec<? extends Record>> codecsByComponent = new ConcurrentHashMap<>();
+    private final Map<Class<? extends Record>, ComponentPreviewHandler<?, ? extends Record>> previewHandlers = new ConcurrentHashMap<>();
 
+    @Override
+    public <R extends Record> void registerComponent(@NotNull ComponentCodec<R> codec) {
+        Objects.requireNonNull(codec, "Codec cannot be null");
 
-    private static final Map<String, Parser<? extends Message>> PARSERS_BY_CLASS_NAME = new ConcurrentHashMap<>();
-
-    public static @Nullable Parser<? extends Message> getParserByClassName(@NotNull String className) {
-        return PARSERS_BY_CLASS_NAME.get(className);
+        codecsByNamespace.put(codec.getComponentNamespace(), codec);
+        codecsByComponent.put(codec.getComponentClass(), codec);
+        LOGGER.info("Registered component: {}:{}", codec.getComponentNamespace().toString());
     }
 
     @Override
-    public <T extends Message> void registerComponent(T defaultInstance, @Nullable ComponentPreviewHandler<ItemStack> previewHandler) {
-        final String fullName = defaultInstance.getDescriptorForType().getFullName();
-        final String shortName = defaultInstance.getDescriptorForType().getName();
-        componentsParsers.put(fullName, defaultInstance.getParserForType());
-        PARSERS_BY_CLASS_NAME.put(defaultInstance.getClass().getName(), defaultInstance.getParserForType());
-        componentsNames.put(fullName, shortName);
-        LOGGER.info("Registered component type: {}", fullName);
-        if (previewHandler != null) {
-            componentsPreviewHandlers.put(fullName, previewHandler);
-            LOGGER.info("Registered component preview handler for {}", shortName);
-        }
+    public <V, R extends Record> void registerPreviewHandler(@NotNull Class<R> recordComponentClass, @NotNull ComponentPreviewHandler<V, R> previewHandler) {
+        Objects.requireNonNull(recordComponentClass, "Record class cannot be null");
+        Objects.requireNonNull(previewHandler, "Preview handler cannot be null");
+        previewHandlers.put(recordComponentClass, previewHandler);
+        LOGGER.info("Registered component preview handler for {}", recordComponentClass.getName());
     }
 
     @Override
-    public <T extends Message> void registerComponent(T defaultInstance) {
-        registerComponent(defaultInstance, null);
-    }
-
-    @Nullable
-    public Message unpack(Any any) {
-
-        final String fullNameWithoutTypeUrl = stripTypeURL(any.getTypeUrl());
-        final Parser<? extends Message> parser = componentsParsers.get(fullNameWithoutTypeUrl);
-
-        if (parser == null) {
-            LOGGER.error("No parser registered for type: {}.", fullNameWithoutTypeUrl);
-            LOGGER.error("Did you call registry.register(MyMessage.getDefaultInstance()) in your plugin?");
-            return null;
-        }
-
-        try {
-            return parser.parseFrom(any.getValue());
-        } catch (Exception e) {
-            LOGGER.error(e, "Failed to parse component of type: {}. The binary value in Any.value may be corrupted or in the wrong format.", fullNameWithoutTypeUrl);
-            return null;
-        }
+    @SuppressWarnings("unchecked")
+    public @Nullable <R extends Record> ComponentCodec<R> getCodec(Class<R> recordComponentClass) {
+        return (ComponentCodec<R>) codecsByComponent.get(recordComponentClass);
     }
 
     @Override
-    public @Nullable Message unpackRawBytes(@NotNull String componentFullName, byte[] rawData) {
-        Parser<? extends Message> parser = componentsParsers.get(componentFullName);
-        if (parser == null) {
-            return null;
-        }
-        try {
-            return parser.parseFrom(rawData);
-        } catch (Exception e) {
-            LOGGER.error(e, "Failed to parse raw bytes for component: {}", componentFullName);
-            return null;
-        }
+    @SuppressWarnings("unchecked")
+    public @Nullable <R extends Record> ComponentCodec<R> getCodec(@NotNull final ComponentNamespace componentNamespace) {
+        return (ComponentCodec<R>) codecsByNamespace.get(componentNamespace);
     }
 
-    public boolean componentFullNameRegistered(@NotNull final String componentFullName) {
-        return componentsNames.containsKey(componentFullName);
+    @Override
+    @SuppressWarnings("unchecked")
+    public @Nullable <V, R extends Record> ComponentPreviewHandler<V, R> getPreviewHandler(@NotNull Class<R> recordClass) {
+        return (ComponentPreviewHandler<V, R>) previewHandlers.get(recordClass);
     }
 
-    public boolean componentShortNameRegistered(@NotNull final String componentName) {
-        return componentsNames.containsValue(componentName);
+    @Override
+    public Collection<ComponentCodec<? extends Record>> getAllCodecs() {
+        return Collections.unmodifiableCollection(codecsByNamespace.values());
     }
 
-    public @Nullable String getComponentShortName(@NotNull final String componentFullName) {
-        return componentsNames.get(componentFullName);
-    }
-
-    public @NotNull Set<String> getRegisteredComponentsFullNames() {
-        return Set.copyOf(componentsNames.keySet());
-    }
-
-    public @NotNull Set<String> getRegisteredComponentsShortsNames() {
-        return Set.copyOf(componentsNames.values());
-    }
-
-    public @Nullable ComponentPreviewHandler<ItemStack> getPreviewHandler(@NotNull final String componentFullName) {
-        return componentsPreviewHandlers.get(componentFullName);
-    }
-
+    @Override
     public int registeredCount() {
-        return componentsParsers.size();
-    }
-
-    public static String stripTypeURL(final @NotNull Message message) {
-        return stripTypeURL(message.getDescriptorForType().getFullName());
-    }
-
-    public static String stripTypeURL(@NotNull final String typeURL) {
-        if (!typeURL.startsWith("type.googleapis.com/")) return typeURL;
-        return typeURL.replace("type.googleapis.com/", "");
-    }
-
-    public static String rebuildTypeUrl(@NotNull final String typeURL) {
-        if (typeURL.startsWith("type.googleapis.com/")) return typeURL;
-        return "type.googleapis.com/" + typeURL;
+        return codecsByNamespace.size();
     }
 
 }

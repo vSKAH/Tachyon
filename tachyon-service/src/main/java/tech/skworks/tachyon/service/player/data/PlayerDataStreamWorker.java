@@ -1,14 +1,12 @@
 package tech.skworks.tachyon.service.player.data;
 
-import com.google.protobuf.Any;
-import com.google.protobuf.Descriptors;
-import com.google.protobuf.DynamicMessage;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protobuf.util.JsonFormat;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.BulkWriteOptions;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.UpdateOneModel;
 import com.mongodb.client.model.UpdateOptions;
+import com.mongodb.client.model.WriteModel;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.stream.ClaimedMessages;
@@ -20,19 +18,18 @@ import io.quarkus.scheduler.Scheduled;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.bson.Document;
+import org.bson.*;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.service.contracts.player.data.PullProfileResponse;
-import tech.skworks.tachyon.service.contracts.player.data.PushProfileRequest;
-import tech.skworks.tachyon.service.infra.DynamicProtobufRegistry;
 import tech.skworks.tachyon.service.infra.RedisKeys;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -50,8 +47,6 @@ class PlayerDataStreamWorker {
     Logger log;
     @Inject
     MongoClient mongo;
-    @Inject
-    DynamicProtobufRegistry protobufRegistry;
     @Inject
     PlayerConfig config;
 
@@ -76,19 +71,18 @@ class PlayerDataStreamWorker {
         this.log.infof("[PlayerStreamWorker] Initialized with consumer ID '%s' on stream '%s'.", config.consumerId(), config.streamKey());
     }
 
-    @Scheduled(every = "PT0.2S", delay = 3L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    @Scheduled(every = "1s", delay = 3L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void processStream() {
         try {
+
             ClaimedMessages<String, String, byte[]> claimed = redisStream.xautoclaim(config.streamKey(), config.streamGroupName(), config.consumerId(), Duration.ofSeconds(30), "0", 100);
             processAndAck(claimed.getMessages(), "reclaimed");
 
-            List<StreamMessage<String, String, byte[]>> fresh;
-            do {
-                fresh = redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(200));
-                if (fresh != null && !fresh.isEmpty()) {
-                    processAndAck(fresh, "new");
-                }
-            } while (fresh != null && fresh.size() >= 200);
+            List<StreamMessage<String, String, byte[]>> fresh = redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(200));
+            if (fresh != null && !fresh.isEmpty()) {
+                processAndAck(fresh, "new");
+            }
+
 
         } catch (Exception e) {
             log.error("[PlayerStreamWorker] Error in stream processing loop.", e);
@@ -100,12 +94,53 @@ class PlayerDataStreamWorker {
 
         log.debugf("[PlayerStreamWorker] Processing %d %s message(s) from stream.", messages.size(), origin);
 
-        int failed = 0;
+        List<WriteModel<Document>> bulkOperations = new ArrayList<>();
         List<String> messagesToAck = new ArrayList<>();
+        List<String> updatedUuids = new ArrayList<>();
+        int failed = 0;
 
         for (StreamMessage<String, String, byte[]> msg : messages) {
-            if (processSingleMessage(msg)) messagesToAck.add(msg.id());
-            else failed++;
+            byte[] saveProfilePayload = msg.payload().get("save_profile_payload");
+
+            if (saveProfilePayload == null) {
+                log.warnf("[PlayerStreamWorker] Message %s has no recognized payload key — poison, dropping (ACK).", msg.id());
+                messagesToAck.add(msg.id());
+                continue;
+            }
+
+            try {
+                RawBsonDocument reqDoc = new RawBsonDocument(saveProfilePayload);
+                String uuid = reqDoc.getString("uuid").getValue();
+
+                Document updateOps = buildUpdateOperations(reqDoc);
+                if (!updateOps.isEmpty()) {
+                    bulkOperations.add(new UpdateOneModel<>(
+                            Filters.eq("uuid", uuid),
+                            updateOps,
+                            new UpdateOptions().upsert(true)
+                    ));
+                    updatedUuids.add(uuid);
+                }
+
+                messagesToAck.add(msg.id());
+            } catch (Exception e) {
+                log.errorf(e, "[PlayerStreamWorker] Transient failure preparing message %s.", msg.id());
+                failed++;
+            }
+        }
+
+        if (!bulkOperations.isEmpty()) {
+            try {
+                playersCollection.bulkWrite(bulkOperations, new BulkWriteOptions().ordered(false));
+                log.infof("[PlayerStreamWorker] BulkWrite written %d operation(s) to MongoDB in 1 network call.", bulkOperations.size());
+            } catch (Exception e) {
+                log.error("[PlayerStreamWorker] Error during MongoDB bulkWrite batch execution.", e);
+                return;
+            }
+        }
+
+        if (!updatedUuids.isEmpty()) {
+            updateCacheBatchAndUnlock(updatedUuids);
         }
 
         if (!messagesToAck.isEmpty()) {
@@ -118,51 +153,25 @@ class PlayerDataStreamWorker {
             log.debugf("[PlayerStreamWorker] %s cycle — %d message(s) processed successfully.", origin, messagesToAck.size());
     }
 
-
-    private boolean processSingleMessage(StreamMessage<String, String, byte[]> msg) {
-        byte[] saveProfilePayload = msg.payload().get("save_profile_payload");
-
-        if (saveProfilePayload == null) {
-            log.warnf("[PlayerStreamWorker] Message %s has no recognized payload key — poison, dropping (ACK).", msg.id());
-            return true;
-        }
-
-        String uuid = null;
-        try {
-            PushProfileRequest req = PushProfileRequest.parseFrom(saveProfilePayload);
-            uuid = req.getUuid();
-            handleSaveProfilePayload(req, uuid);
-            return true;
-        } catch (InvalidProtocolBufferException e) {
-            log.errorf(e, "[PlayerStreamWorker] Message %s is not a valid PushProfileRequest — poison, dropping (ACK).", msg.id());
-            return true;
-        } catch (Exception e) {
-            log.errorf(e, "[PlayerStreamWorker] Transient failure on message %s (uuid=%s) — left pending for retry.", msg.id(), uuid);
-            if (uuid != null) {
-                redisKey.del(RedisKeys.dirty(uuid));
-                log.warnf("[PlayerStreamWorker] Released dirty key for %s after processing error.", uuid);
-            }
-            return false;
-        }
-    }
-
-    private void handleSaveProfilePayload(PushProfileRequest request, String uuid) throws InvalidProtocolBufferException {
-        log.debugf("[PlayerStreamWorker] Processing SaveProfile for %s (%d component(s) to saves, %d component(s)) to remove.", uuid, request.getComponentsToSaveCount(), request.getComponentsToRemoveCount());
-
+    private Document buildUpdateOperations(RawBsonDocument reqDoc) {
         Document updateOperations = new Document();
         Document setDocument = new Document();
         Document unsetDocument = new Document();
 
-        for (Any any : request.getComponentsToSaveList()) {
-            String typeUrl = any.getTypeUrl();
-
-            Document docToInsert = new Document(Document.parse(protobufRegistry.getPrinter().print(any)));
-            docToInsert.put("@type", DynamicProtobufRegistry.stripTypeURL(typeUrl));
-            setDocument.put("components." + toCleanKey(typeUrl), docToInsert);
+        if (reqDoc.containsKey("save") && reqDoc.isDocument("save")) {
+            BsonDocument saveDocs = reqDoc.getDocument("save");
+            for (String compName : saveDocs.keySet()) {
+                setDocument.put("components." + compName, saveDocs.get(compName));
+            }
         }
 
-        for (String urlToRemove : request.getComponentsToRemoveList()) {
-            unsetDocument.put("components." + toCleanKey(DynamicProtobufRegistry.stripTypeURL(urlToRemove)), "");
+        if (reqDoc.containsKey("remove") && reqDoc.isArray("remove")) {
+            BsonArray removeArray = reqDoc.getArray("remove");
+            for (BsonValue val : removeArray) {
+                if (val.isString()) {
+                    unsetDocument.put("components." + val.asString().getValue(), "");
+                }
+            }
         }
 
         if (!setDocument.isEmpty()) {
@@ -172,16 +181,7 @@ class PlayerDataStreamWorker {
             updateOperations.put("$unset", unsetDocument);
         }
 
-        if (!updateOperations.isEmpty()) {
-            // takeSnapshotIfAllowed(uuid, "AUTO_PROFILE_SAVE");
-
-            playersCollection.updateOne(Filters.eq("uuid", uuid), updateOperations, new UpdateOptions().upsert(true));
-            log.infof("[PlayerStreamWorker] SaveProfile written to MongoDB for %s.", uuid);
-        } else {
-            log.debugf("[PlayerStreamWorker] Empty batch for %s, MongoDB update skipped.", uuid);
-        }
-
-        updateCacheAndUnlock(uuid);
+        return updateOperations;
     }
 
     private void takeSnapshotIfAllowed(String uuid, String reason) {
@@ -206,70 +206,34 @@ class PlayerDataStreamWorker {
         }
     }
 
-    private void updateCacheAndUnlock(String uuid) {
+    private void updateCacheBatchAndUnlock(List<String> uuids) {
+        Set<String> uniqueUuids = new HashSet<>(uuids);
         try {
-            Document updatedDoc = playersCollection.find(Filters.eq("uuid", uuid)).first();
-            if (updatedDoc == null) {
-                log.warnf("[PlayerStreamWorker] updateCacheAndUnlock: no document found for %s — cache not updated.", uuid);
-                return;
+            MongoCollection<RawBsonDocument> rawCollection = mongo.getDatabase(dbName).getCollection(config.collection(), RawBsonDocument.class);
+            List<RawBsonDocument> docs = rawCollection.find(Filters.in("uuid", uniqueUuids)).into(new ArrayList<>());
+            for (RawBsonDocument updatedDoc : docs) {
+                String uuid = updatedDoc.getString("uuid").getValue();
+                if (uuid == null) continue;
+
+                BsonDocument components = updatedDoc.containsKey("components") && updatedDoc.isDocument("components")
+                        ? updatedDoc.getDocument("components")
+                        : new BsonDocument();
+
+                BsonDocument profileResponseDoc = new BsonDocument("uuid", new BsonString(uuid))
+                        .append("components", components);
+
+                byte[] cacheBytes = PlayerDataGrpcService.bsonDocumentToBytes(profileResponseDoc);
+                redisBytes.setex(RedisKeys.cache(uuid), RedisKeys.CACHE_TTL_SECONDS, cacheBytes);
+                log.debugf("[PlayerStreamWorker] Cache updated for %s (%d bytes).", uuid, cacheBytes.length);
             }
-
-            PullProfileResponse.Builder response = PullProfileResponse.newBuilder().setUuid(uuid);
-            int cacheHits = 0;
-            int cacheMisses = 0;
-
-            if (updatedDoc.containsKey("components")) {
-                Document components = updatedDoc.get("components", Document.class);
-                for (String dbKey : components.keySet()) {
-                    Document compDoc = components.get(dbKey, Document.class);
-                    String shortType = compDoc.getString("@type");
-
-                    if (shortType == null) {
-                        log.warnf("[PlayerStreamWorker] Component '%s' missing '@type' field for player %s — skipped.", dbKey, uuid);
-                        cacheMisses++;
-                        continue;
-                    }
-
-                    Document compForJson = new Document(compDoc);
-                    compForJson.remove("@type");
-
-                    Any any = buildAnyFromJson(shortType, compForJson.toJson());
-                    if (any != null) {
-                        response.addComponents(any);
-                        cacheHits++;
-                    } else {
-                        log.warnf("[PlayerStreamWorker] Unknown type '%s' for player %s — is the .desc loaded?", shortType, uuid);
-                        cacheMisses++;
-                    }
-                }
-            }
-            byte[] cacheBytes = response.build().toByteArray();
-            redisBytes.setex(RedisKeys.cache(uuid), RedisKeys.CACHE_TTL_SECONDS, cacheBytes);
-            log.infof("[PlayerStreamWorker] Cache updated for %s — %d component(s) cached, %d skipped (%d bytes).", uuid, cacheHits, cacheMisses, cacheBytes.length);
         } catch (Exception e) {
-            log.errorf(e, "[PlayerStreamWorker] Failed to update cache for %s.", uuid);
+            log.errorf(e, "[PlayerStreamWorker] Failed to batch update cache for %d player(s).", uniqueUuids.size());
         } finally {
-            redisKey.del(RedisKeys.dirty(uuid));
-            log.infof("[PlayerStreamWorker] Dirty key released for %s.", uuid);
+            List<String> dirtyKeys = uniqueUuids.stream().map(RedisKeys::dirty).toList();
+            if (!dirtyKeys.isEmpty()) {
+                redisKey.del(dirtyKeys.toArray(new String[0]));
+                log.debugf("[PlayerStreamWorker] Released %d dirty key(s) in bulk Redis call.", dirtyKeys.size());
+            }
         }
-    }
-
-    private Any buildAnyFromJson(String protoFullName, String json) {
-        try {
-            Descriptors.Descriptor descriptor = protobufRegistry.findDescriptor(protoFullName);
-            if (descriptor == null) return null;
-
-            DynamicMessage.Builder builder = DynamicMessage.newBuilder(descriptor);
-            JsonFormat.parser().usingTypeRegistry(protobufRegistry.getTypeRegistry()).ignoringUnknownFields().merge(json, builder);
-
-            return Any.pack(builder.build());
-        } catch (Exception e) {
-            log.errorf(e, "[PlayerStreamWorker] buildAnyFromJson failed for type '%s'.", protoFullName);
-            return null;
-        }
-    }
-
-    public static String toCleanKey(String typeUrl) {
-        return typeUrl.substring(typeUrl.lastIndexOf('.') + 1);
     }
 }

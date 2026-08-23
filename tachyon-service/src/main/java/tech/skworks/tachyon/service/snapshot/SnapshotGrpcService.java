@@ -34,6 +34,7 @@ import tech.skworks.tachyon.service.contracts.snapshot.*;
 import tech.skworks.tachyon.service.infra.DynamicProtobufRegistry;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -278,6 +279,21 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
         JsonObject componentsJson = document.getAsJsonObject("components");
         for (Map.Entry<String, JsonElement> entry : componentsJson.entrySet()) {
             JsonObject componentData = entry.getValue().getAsJsonObject();
+
+            if (componentData.has("$binary")) {
+                JsonObject binaryObj = componentData.getAsJsonObject("$binary");
+                if (binaryObj.has("base64")) {
+                    String base64 = binaryObj.get("base64").getAsString();
+                    try {
+                        byte[] bytes = Base64.getDecoder().decode(base64);
+                        Any any = Any.parseFrom(bytes);
+                        response.putComponents(any.getTypeUrl(), any);
+                        continue;
+                    } catch (Exception e) {
+                        logger.warnf(e, "Failed to parse binary component in snapshot %s for key %s", snapshotId, entry.getKey());
+                    }
+                }
+            }
 
             if (!componentData.has("@type")) {
                 logger.warnf("Missing '@type' in 'components.%s' of snapshot: %s", entry.getKey(), snapshotId);

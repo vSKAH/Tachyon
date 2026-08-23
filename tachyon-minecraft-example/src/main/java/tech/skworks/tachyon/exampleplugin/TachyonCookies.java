@@ -7,7 +7,8 @@ import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import tech.skworks.tachyon.api.TachyonAPI;
 import tech.skworks.tachyon.api.component.ComponentPreviewHandler;
-import tech.skworks.tachyon.exampleplugin.components.CookieComponent;
+import tech.skworks.tachyon.exampleplugin.component.CookieComponent;
+import tech.skworks.tachyon.exampleplugin.component.CookieComponentBuilder;
 import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 
 /**
@@ -20,7 +21,7 @@ import tech.skworks.tachyon.libs.com.google.protobuf.Message;
  */
 public class TachyonCookies extends JavaPlugin {
 
-    private TachyonAPI<ItemStack> tachyon;
+    private TachyonAPI tachyon;
 
     @Override
     public void onEnable() {
@@ -30,7 +31,9 @@ public class TachyonCookies extends JavaPlugin {
             return;
         }
 
-        tachyon.getComponentRegistry().registerComponent(CookieComponent.getDefaultInstance(), new ComponentPreviewHandler<>() {
+        tachyon.getComponentRegistry().registerComponent(new CookieComponent.CookieComponentCodec());
+
+        tachyon.getComponentRegistry().registerPreviewHandler(CookieComponent.class, new ComponentPreviewHandler<>() {
 
             //Used inside gui /snapshot list to differentiate components inside a full snapshot
             @Override
@@ -38,15 +41,12 @@ public class TachyonCookies extends JavaPlugin {
                 return new ItemStack(Material.COOKIE);
             }
 
-            //Used to say how to represent the datas inside the snapshot gui
             @Override
-            public <C extends Message> ItemStack[] buildComponentDataDisplay(C message) {
-                CookieComponent cookieComponent = (CookieComponent) message;
-
+            public Object[] buildComponentDataDisplay(CookieComponent record) {
                 //You can use an ItemBuilder for better readability.
                 ItemStack itemStack = new ItemStack(Material.COOKIE);
                 ItemMeta meta = itemStack.getItemMeta();
-                meta.setDisplayName(" Amount of Cookie: " + cookieComponent.getCookies());
+                meta.setDisplayName(" Amount of Cookie: " + record.cookiesAmount());
                 itemStack.setItemMeta(meta);
 
                 return new ItemStack[]{itemStack};
@@ -64,7 +64,7 @@ public class TachyonCookies extends JavaPlugin {
         return tachyon != null;
     }
 
-    public TachyonAPI<ItemStack> getTachyon() {
+    public TachyonAPI getTachyon() {
         return tachyon;
     }
 }

@@ -1,15 +1,10 @@
 package tech.skworks.tachyon.service.player.data;
 
-import com.google.protobuf.Any;
-import com.google.protobuf.Descriptors;
-import com.google.protobuf.DynamicMessage;
-import com.google.protobuf.Empty;
-import com.google.protobuf.util.JsonFormat;
 import com.mongodb.MongoSocketException;
 import com.mongodb.MongoTimeoutException;
 import com.mongodb.client.model.Filters;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
+import io.grpc.*;
+import io.grpc.stub.ServerCalls;
 import io.quarkus.grpc.GrpcService;
 import io.quarkus.mongodb.reactive.ReactiveMongoClient;
 import io.quarkus.mongodb.reactive.ReactiveMongoCollection;
@@ -21,53 +16,67 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.redis.datasource.value.SetArgs;
 import io.smallrye.common.annotation.NonBlocking;
 import io.smallrye.mutiny.Uni;
-import io.smallrye.mutiny.infrastructure.Infrastructure;
 import jakarta.annotation.PostConstruct;
 import jakarta.inject.Inject;
-import org.bson.Document;
+import org.bson.BsonBinaryWriter;
+import org.bson.BsonDocument;
+import org.bson.BsonString;
+import org.bson.RawBsonDocument;
+import org.bson.codecs.BsonDocumentCodec;
+import org.bson.codecs.EncoderContext;
+import org.bson.io.BasicOutputBuffer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.service.contracts.player.data.*;
-import tech.skworks.tachyon.service.infra.DynamicProtobufRegistry;
 import tech.skworks.tachyon.service.infra.RedisKeys;
+import tech.skworks.tachyon.service.infra.grpc.BsonMarshaller;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
+import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.Map;
 
 /**
  * Project Tachyon
  * Class PlayerDataGrpcService
- *
- * @author  Jimmy (vSKAH) - 06/04/2026
- * @version 1.0
- * @since 1.0.0-SNAPSHOT
+ * Pure BSON gRPC Service using BsonMarshaller
  */
 @GrpcService
 @NonBlocking
-public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDataServiceImplBase {
+public class PlayerDataGrpcService implements BindableService {
 
     @Inject
     Logger log;
     @Inject
     PlayerConfig config;
-    @Inject
-    DynamicProtobufRegistry protobufRegistry;
 
     @ConfigProperty(name = "quarkus.mongodb.database")
     String dbName;
     @Inject
     ReactiveMongoClient mongoClient;
-    @Inject
-    DynamicProtobufRegistry dynamicProtobufRegistry;
-    private ReactiveMongoCollection<Document> playersCollection;
 
-    private static final XAddArgs STREAM_ARGS = new XAddArgs().maxlen(10000L).nearlyExactTrimming();
+    private ReactiveMongoCollection<RawBsonDocument> playersCollection;
+
+    private static final XAddArgs STREAM_ARGS = new XAddArgs().maxlen(50000L).nearlyExactTrimming();
     private final ReactiveValueCommands<String, String> redisString;
     private final ReactiveValueCommands<String, byte[]> redisBytes;
     private final ReactiveStreamCommands<String, String, byte[]> redisStream;
     private final ReactiveKeyCommands<String> redisKey;
 
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> PULL_PROFILE_METHOD =
+            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
+                    .setType(MethodDescriptor.MethodType.UNARY)
+                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.PlayerDataService", "PullProfile"))
+                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
+                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
+                    .build();
+
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> PUSH_PROFILE_METHOD =
+            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
+                    .setType(MethodDescriptor.MethodType.UNARY)
+                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.PlayerDataService", "PushProfile"))
+                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
+                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
+                    .build();
 
     public PlayerDataGrpcService(ReactiveRedisDataSource redisDS) {
         this.redisString = redisDS.value(String.class);
@@ -78,197 +87,132 @@ public class PlayerDataGrpcService extends MutinyPlayerDataServiceGrpc.PlayerDat
 
     @PostConstruct
     void init() {
-        this.playersCollection = mongoClient.getDatabase(dbName).getCollection(config.collection());
+        this.playersCollection = mongoClient.getDatabase(dbName).getCollection(config.collection(), RawBsonDocument.class);
     }
 
-
     @Override
-    public Uni<PullProfileResponse> pullProfile(PullProfileRequest request) {
-        final String uuid = request.getUuid();
+    public ServerServiceDefinition bindService() {
+        return ServerServiceDefinition.builder("tech.skworks.tachyon.PlayerDataService")
+                .addMethod(PULL_PROFILE_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                    pullProfile(request).subscribe().with(
+                            response -> {
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                            },
+                            error -> responseObserver.onError(error)
+                    );
+                }))
+                .addMethod(PUSH_PROFILE_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                    pushProfile(request).subscribe().with(
+                            response -> {
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                            },
+                            error -> responseObserver.onError(error)
+                    );
+                }))
+                .build();
+    }
+
+    public Uni<RawBsonDocument> pullProfile(RawBsonDocument request) {
+        final String uuid = request.getString("uuid").getValue();
         final String dirtyKey = RedisKeys.dirty(uuid);
         final String stateKey = RedisKeys.state(uuid);
         final String cacheKey = RedisKeys.cache(uuid);
 
-        log.debugf("[PlayerDataGrpcService] getPlayer() called for %s.", uuid);
+        log.debugf("[PlayerDataGrpcService] pullProfile() called for %s.", uuid);
 
         return redisString.get(dirtyKey).chain(dirty -> {
-                    if (dirty != null) {
-                        log.infof("[PlayerDataGrpcService] getPlayer() for %s blocked — DATA_DIRTY (save in progress).", uuid);
-                        return Uni.createFrom().failure(Status.CANCELLED.withDescription("DATA_DIRTY: Player data is currently being saved (Player: " + uuid + ")").asRuntimeException());
+            if (dirty != null) {
+                log.infof("[PlayerDataGrpcService] pullProfile() for %s blocked — DATA_DIRTY (save in progress).", uuid);
+                return Uni.createFrom().failure(Status.CANCELLED.withDescription("DATA_DIRTY: Player data is currently being saved (Player: " + uuid + ")").asRuntimeException());
+            }
+
+            return redisString.setAndChanged(stateKey, "USED", new SetArgs().nx().ex(RedisKeys.STATE_TTL_SECONDS)).chain(acquired -> {
+                if (!acquired) {
+                    log.infof("[PlayerDataGrpcService] pullProfile() for %s blocked — ALREADY_LOADED (active on another server).", uuid);
+                    return Uni.createFrom().failure(Status.CANCELLED.withDescription("ALREADY_LOADED: Player data is currently active on another server (Player: " + uuid + ")").asRuntimeException());
+                }
+
+                log.debugf("[PlayerDataGrpcService] State set to USED for %s — checking cache...", uuid);
+
+                return redisBytes.get(cacheKey).chain(cached -> {
+                    if (cached != null) {
+                        log.infof("[PlayerDataGrpcService] Cache HIT for %s (%d bytes).", uuid, cached.length);
+                        return Uni.createFrom().item(new RawBsonDocument(cached));
                     }
 
-                    return redisString.setAndChanged(stateKey, "USED", new SetArgs().nx().ex(RedisKeys.STATE_TTL_SECONDS)).chain(acquired -> {
-                        if (!acquired) {
-                            log.infof("[PlayerDataGrpcService] getPlayer() for %s blocked — ALREADY_LOADED (active on another server).", uuid);
-                            return Uni.createFrom().failure(Status.CANCELLED.withDescription("ALREADY_LOADED: Player data is currently active on another server (Player: " + uuid + ")").asRuntimeException());
-                        }
-
-                        log.debugf("[PlayerDataGrpcService] State set to USED for %s — checking cache...", uuid);
-
-                        return redisBytes.get(cacheKey).chain(cached -> {
-                            if (cached != null) {
-                                log.infof("[PlayerDataGrpcService] Cache HIT for %s (%d bytes).", uuid, cached.length);
-                                return parseResponse(cached);
-                            }
-
-                            log.infof("[PlayerDataGrpcService] Cache MISS for %s — reading from MongoDB.", uuid);
-                            return readFromMongo(uuid)
-                                    .chain(response -> {
-                                        log.infof("[PlayerDataGrpcService] MongoDB read successful for %s — %d component(s) loaded, caching.", uuid, response.getComponentsCount());
-                                        return redisBytes.setex(cacheKey, RedisKeys.CACHE_TTL_SECONDS, response.toByteArray()).replaceWith(response);
-                                    })
-                                    .onFailure().invoke(() -> log.errorf("[PlayerDataGrpcService] MongoDB read failed for %s — releasing state.", uuid))
-                                    .onFailure().call(() -> redisKey.del(stateKey));
-                        });
-                    });
-                })
-                .onFailure().invoke(e -> {
-                    if (e instanceof StatusRuntimeException sre && sre.getStatus().getCode() == Status.Code.CANCELLED) {
-                        log.infof("[PlayerDataGrpcService] getPlayer() gracefully aborted for %s: %s", uuid, sre.getStatus().getDescription());
-                    } else {
-                        log.errorf(e, "[PlayerDataGrpcService] Unexpected failure in getPlayer() for %s — clearing state.", uuid);
-                    }
-                }).onFailure().call(e -> {
-                    if (e instanceof StatusRuntimeException sre && sre.getStatus().getCode() == Status.Code.CANCELLED) {
-                        return Uni.createFrom().voidItem();
-                    }
-                    return redisKey.del(stateKey).onFailure().recoverWithItem(0);
-                })
-                .onFailure().transform(e -> {
-                    if (e instanceof StatusRuntimeException) {
-                        return e;
-                    }
-
-                    return Status.UNAVAILABLE
-                            .withCause(e)
-                            .withDescription("Unable to get the player profile: " + e.getMessage())
-                            .asRuntimeException();
+                    log.infof("[PlayerDataGrpcService] Cache MISS for %s — reading from MongoDB.", uuid);
+                    return readFromMongo(uuid)
+                            .chain(response -> {
+                                byte[] bytes = toByteArray(response);
+                                log.infof("[PlayerDataGrpcService] MongoDB read successful for %s — caching (%d bytes).", uuid, bytes.length);
+                                return redisBytes.setex(cacheKey, RedisKeys.CACHE_TTL_SECONDS, bytes).replaceWith(response);
+                            })
+                            .onFailure().invoke(() -> log.errorf("[PlayerDataGrpcService] MongoDB read failed for %s — releasing state.", uuid))
+                            .onFailure().call(() -> redisKey.del(stateKey));
                 });
+            });
+        }).onFailure().call(e -> {
+            if (e instanceof StatusRuntimeException sre && sre.getStatus().getCode() == Status.Code.CANCELLED) {
+                return Uni.createFrom().voidItem();
+            }
+            return redisKey.del(stateKey).onFailure().recoverWithItem(0);
+        });
     }
 
-    @Override
-    public Uni<Empty> pushProfile(PushProfileRequest request) {
-        final String uuid = request.getUuid();
+    public Uni<RawBsonDocument> pushProfile(RawBsonDocument request) {
+        final String uuid = request.getString("uuid").getValue();
         final String dirtyKey = RedisKeys.dirty(uuid);
+        final byte[] payloadBytes = toByteArray(request);
 
-        log.debugf("[PlayerDataGrpcService] saveProfile() called for %s (%d component(s) to saves, %d component(s) to remove).", uuid, request.getComponentsToSaveCount(), request.getComponentsToRemoveCount());
-
-
-        try {
-            for (String url : request.getComponentsToRemoveList())
-                assertComponentRegistered(DynamicProtobufRegistry.rebuildTypeUrl(url), uuid, "delete");
-            for (Any any : request.getComponentsToSaveList())
-                assertComponentRegistered(DynamicProtobufRegistry.stripTypeURL(any.getTypeUrl()), uuid, "save");
-        } catch (StatusRuntimeException e) {
-            return Uni.createFrom().failure(e);
-        }
+        log.debugf("[PlayerDataGrpcService] pushProfile() enqueuing save for %s (%d bytes).", uuid, payloadBytes.length);
 
         return redisString.setex(dirtyKey, RedisKeys.DIRTY_TTL_SECONDS, "1")
-                .chain(() -> redisStream.xadd(config.streamKey(), STREAM_ARGS, Map.of("save_profile_payload", request.toByteArray())))
+                .chain(() -> redisStream.xadd(config.streamKey(), STREAM_ARGS, Map.of("save_profile_payload", payloadBytes)))
                 .invoke(id -> log.infof("[PlayerDataGrpcService] saveProfile() enqueued for %s (stream message id: %s).", uuid, id))
-                .replaceWith(Empty.getDefaultInstance())
+                .replaceWith(emptyBsonResponse())
                 .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] saveProfile() failed to enqueue for %s — releasing dirty key.", uuid))
-                .onFailure().call(() -> redisKey.del(dirtyKey))
-                .onFailure().transform(e -> {
-                    if (e instanceof StatusRuntimeException) return e;
-                    return Status.UNAVAILABLE.withCause(e).withDescription("Failed to enqueue the profile saving in Redis!").asRuntimeException();
-                });
+                .onFailure().call(() -> redisKey.del(dirtyKey));
     }
 
-    private Uni<PullProfileResponse> readFromMongo(String uuid) {
+    private Uni<RawBsonDocument> readFromMongo(String uuid) {
         return playersCollection.find(Filters.eq("uuid", uuid)).collect().first()
                 .ifNoItem().after(Duration.ofSeconds(5)).failWith(() -> new MongoTimeoutException("MongoDB response timeout for " + uuid))
                 .onFailure(e -> e instanceof MongoSocketException || e instanceof MongoTimeoutException)
                 .retry().withBackOff(Duration.ofMillis(200)).atMost(2)
                 .onItem().transform(doc -> {
-                    PullProfileResponse.Builder response = PullProfileResponse.newBuilder().setUuid(uuid);
-
                     if (doc == null) {
                         log.infof("[PlayerDataGrpcService] No document found in MongoDB for %s — returning empty profile.", uuid);
-                        return response.build();
+                        BsonDocument emptyResp = new BsonDocument("uuid", new BsonString(uuid)).append("components", new BsonDocument());
+                        return new RawBsonDocument(bsonDocumentToBytes(emptyResp));
                     }
 
-                    if (!doc.containsKey("components")) {
-                        log.debugf("[PlayerDataGrpcService] Document for %s has no 'components' field.", uuid);
-                        return response.build();
-                    }
+                    BsonDocument components = doc.containsKey("components") && doc.isDocument("components")
+                            ? doc.getDocument("components")
+                            : new BsonDocument();
 
-                    Document components = doc.get("components", Document.class);
-
-                    int loaded = 0;
-                    int skipped = 0;
-
-                    for (String key : components.keySet()) {
-                        Document compDoc = components.get(key, Document.class);
-                        if (compDoc == null) continue;
-
-                        String typeUrl = compDoc.getString("@type");
-                        if (typeUrl == null) {
-                            log.warnf("[PlayerDataGrpcService] Component '%s' missing '@type' field for player %s — skipped.", key, uuid);
-                            skipped++;
-                            continue;
-                        }
-
-
-                        Document compForJson = new Document(compDoc);
-                        compForJson.put("@type", DynamicProtobufRegistry.rebuildTypeUrl(typeUrl));
-
-                        Any any = buildAnyFromJson(typeUrl, compForJson.toJson());
-                        if (any != null) {
-                            response.addComponents(any);
-                            loaded++;
-                        } else {
-                            log.warnf("[PlayerDataGrpcService] Unknown proto type '%s' for player %s — is the .desc file loaded?", typeUrl, uuid);
-                            skipped++;
-                        }
-
-                    }
-
-                    log.infof("[PlayerDataGrpcService] MongoDB read for %s: %d component(s) loaded, %d skipped.", uuid, loaded, skipped);
-                    return response.build();
-                })
-
-                .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] Critical MongoDB read failure for %s.", uuid))
-                .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("MongoDB read failed!").asRuntimeException());
+                    BsonDocument responseDoc = new BsonDocument("uuid", new BsonString(uuid)).append("components", components);
+                    return new RawBsonDocument(bsonDocumentToBytes(responseDoc));
+                });
     }
 
-    private Uni<PullProfileResponse> parseResponse(byte[] bytes) {
-        return Uni.createFrom().item(() -> {
-            try {
-                return PullProfileResponse.parseFrom(bytes);
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to parse cached PlayerResponse", e);
-            }
-        }).runSubscriptionOn(Infrastructure.getDefaultWorkerPool());
+    public static byte[] toByteArray(RawBsonDocument doc) {
+        ByteBuffer nio = doc.getByteBuffer().asNIO().duplicate();
+        byte[] bytes = new byte[nio.remaining()];
+        nio.get(bytes);
+        return bytes;
     }
 
-    private void assertComponentRegistered(String typeUrl, String uuid, String action) {
-        if (dynamicProtobufRegistry.findDescriptor(typeUrl) == null) {
-            log.errorf("Unable to %s component %s for player %s. The component is not registered inside the registry.", action, typeUrl, uuid);
-            log.errorf("Loaded components: ");
-            for (Descriptors.Descriptor loadedDescriptor : dynamicProtobufRegistry.getLoadedDescriptors()) {
-                log.errorf("  - %s",loadedDescriptor.getFullName());
-                log.errorf("  - %s",loadedDescriptor.getName());
-
-            }
-            throw Status.INVALID_ARGUMENT
-                    .withDescription(String.format("Unable to find the component %s inside the service registry.", typeUrl))
-                    .asRuntimeException();
+    public static byte[] bsonDocumentToBytes(BsonDocument document) {
+        BasicOutputBuffer buffer = new BasicOutputBuffer();
+        try (BsonBinaryWriter writer = new BsonBinaryWriter(buffer)) {
+            new BsonDocumentCodec().encode(writer, document, EncoderContext.builder().build());
         }
+        return buffer.toByteArray();
     }
 
-    private Any buildAnyFromJson(String protoFullName, String json) {
-        try {
-            Descriptors.Descriptor descriptor = protobufRegistry.findDescriptor(protoFullName);
-            if (descriptor == null) return null;
-
-            DynamicMessage.Builder builder = DynamicMessage.newBuilder(descriptor);
-            JsonFormat.parser().usingTypeRegistry(protobufRegistry.getTypeRegistry()).ignoringUnknownFields().merge(json, builder);
-
-            return Any.pack(builder.build());
-        } catch (Exception e) {
-            log.errorf(e, "buildAnyFromJson failed for type '%s'", protoFullName);
-            return null;
-        }
+    private static RawBsonDocument emptyBsonResponse() {
+        return new RawBsonDocument(bsonDocumentToBytes(new BsonDocument()));
     }
 }

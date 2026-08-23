@@ -8,7 +8,6 @@ import tech.skworks.tachyon.libs.io.grpc.Status;
 import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
 import tech.skworks.tachyon.service.contracts.snapshot.*;
 import tech.skworks.tachyon.libs.com.google.protobuf.ByteString;
-import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.core.grpc.BackendStubProvider;
 import tech.skworks.tachyon.plugin.core.metric.scraper.TachyonMetrics;
@@ -72,13 +71,13 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
     }
 
     @Override
-    public <T extends Message> CompletableFuture<Void> takeComponentSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason,
+    public <T extends Record> CompletableFuture<Void> takeComponentSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason,
                                                                              @NotNull final SnapshotTriggerType triggerType, @NotNull final T component) {
         return asyncRun(executor, LOGGER, "takeComponentSnapshot", () -> {
-            TakeComponentSnapshotRequest request = TakeComponentSnapshotRequest.newBuilder().setPlayerId(playerUniqueId).setReason(reason)
-                    .setTriggerType(triggerType).setTargetComponent(component.getDescriptorForType().getFullName())
-                    .setRawData(ByteString.copyFrom(Zstd.compress(component.toByteArray()))).build();
-            backendStubProvider.getSnapshotStub(3).takeComponentSnapshot(request);
+            //TakeComponentSnapshotRequest request = TakeComponentSnapshotRequest.newBuilder().setPlayerId(playerUniqueId).setReason(reason)
+              //      .setTriggerType(triggerType).setTargetComponent(component.getDescriptorForType().getFullName())
+               //     .setRawData(ByteString.copyFrom(Zstd.compress(component.toByteArray()))).build();
+            //backendStubProvider.getSnapshotStub(3).takeComponentSnapshot(request);
         });
 
     }

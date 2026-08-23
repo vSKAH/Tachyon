@@ -3,7 +3,7 @@ package tech.skworks.tachyon.api.services;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
-import tech.skworks.tachyon.service.contracts.player.data.PullProfileResponse;
+import tech.skworks.tachyon.libs.org.bson.BsonDocument;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -17,7 +17,7 @@ import java.util.concurrent.CompletableFuture;
  * @since 1.0.0-SNAPSHOT
  */
 public interface PlayerDataService {
-    @Nullable PullProfileResponse tryPullProfile(@NotNull final UUID uuid);
+    @Nullable BsonDocument tryPullProfile(@NotNull final UUID uuid);
 
     @NotNull CompletableFuture<Void> pushProfile(@NotNull final TachyonProfile tachyonProfile);
 

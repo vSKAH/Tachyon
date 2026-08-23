@@ -2,12 +2,14 @@ package tech.skworks.tachyon.api.profile;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import tech.skworks.tachyon.libs.com.google.protobuf.Message;
+import tech.skworks.tachyon.api.component.ComponentNamespace;
+import tech.skworks.tachyon.libs.org.bson.BsonDocument;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
-import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
 /**
  * Project Tachyon
@@ -36,20 +38,19 @@ public interface TachyonProfile {
      * @param component The new Protobuf component instance to store.
      * @param <T>       The specific type of the Protobuf message.
      */
-    <T extends Message> void setComponent(@NotNull final T component);
+    <T extends Record> void setComponent(@NotNull final T component);
 
     /**
-     * Convenience method to safely update an existing component using its Builder.
+     * Convenience method to safely update an existing Record component using its Builder.
      * <p>
-     * This retrieves the current component, converts it to a Builder, applies your modifications,
-     * rebuilds it, and automatically calls {@link #setComponent(Message)} to mark it as dirty.
+     * This retrieves the current immutable Record component, applies the modification function
+     * replaces the stored component, and automatically mark it as dirty for the next save cycle, and increment its version counter.
      *
-     * @param clazz    The class of the component to update.
-     * @param modifier A consumer applying the changes to the component's builder.
-     * @param <T>      The specific type of the Protobuf message.
-     * @param <B>      The specific type of the Protobuf message's Builder.
+     * @param clazz    The class of the Record component to update
+     * @param modifier  A function taking the current Record instance and returning a new updated Record instance.
+     * @param <T>      The specific record comportnent type
      */
-    <T extends Message, B extends Message.Builder> void updateComponent(@NotNull final Class<T> clazz, @NotNull final Consumer<B> modifier);
+    <T extends Record> void updateComponent(@NotNull final Class<T> clazz, @NotNull final UnaryOperator<T> modifier);
 
     /**
      * Retrieves a component by its class type, returning a fallback value if it is not found.
@@ -59,7 +60,7 @@ public interface TachyonProfile {
      * @param <T>          The specific type of the Protobuf message.
      * @return The current component instance, or the provided default value.
      */
-    <T extends Message> T getComponent(@NotNull final Class<T> clazz, @NotNull final T defaultValue);
+    <T extends Record> T getComponent(@NotNull final Class<T> clazz, @NotNull final T defaultValue);
 
     /**
      * Retrieves a component by its class type.
@@ -68,26 +69,18 @@ public interface TachyonProfile {
      * @param <T>   The specific type of the Protobuf message.
      * @return The current component instance, or {@code null} if not found.
      */
-    @Nullable <T extends Message> T getComponent(@NotNull final Class<T> clazz);
+    @Nullable <T extends Record> T getComponent(@NotNull final Class<T> clazz);
 
-    /**
-     * Retrieves a component by its short name (e.g., "CookieComponent").
-     *
-     * @param componentShortName The exact short name of the Protobuf descriptor.
-     * @param <T>                The specific type of the Protobuf message.
-     * @return The current component instance, or {@code null} if not found.
-     */
-    @Nullable <T extends Message> T getComponent(@NotNull final String componentShortName);
 
-    <T extends Message> void removeComponent(@NotNull final T componentDefaultInstance);
+    <T extends Record> void removeComponent(@NotNull final Class<T> clazz);
 
     boolean hasPendingChanges();
 
-    @NotNull List<Message> extractDirtyComponents();
+    @NotNull Map<ComponentNamespace, BsonDocument> extractDirtyComponents();
 
-    @NotNull List<String> extractDeletedComponentsUrls();
+    @NotNull List<ComponentNamespace> extractDeletedComponents();
 
-    void markAsClean(@NotNull final Collection<Class<? extends Message>> savedClasses, @NotNull final Collection<String> deletedComponent);
+    void markAsClean(@NotNull final Collection<Class<? extends Record>> savedClasses, @NotNull final Collection<ComponentNamespace> deletedComponent);
     /**
      * Gets the unique identifier of the player who owns this profile.
      *

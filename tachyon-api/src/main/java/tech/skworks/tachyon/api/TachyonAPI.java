@@ -16,14 +16,12 @@ import tech.skworks.tachyon.api.services.*;
  * telemetry auditing, and the snapshot backup system.
  * </p>
  *
- * @param <V> The visual object type used by the {@link ComponentRegistry} and UI systems
- * (e.g., {@code org.bukkit.inventory.ItemStack} for a Spigot implementation).
  *
  * @author  Jimmy (vSKAH) - 13/04/2026
  * @version 1.0
  * @since 1.0.0-SNAPSHOT
  */
-public interface TachyonAPI<V> {
+public interface TachyonAPI {
 
     /**
      * Retrieves the registry responsible for managing live player profiles.
@@ -45,7 +43,7 @@ public interface TachyonAPI<V> {
      *
      * @return The active {@link ComponentRegistry} instance.
      */
-    ComponentRegistry<V> getComponentRegistry();
+    ComponentRegistry getComponentRegistry();
 
     /**
      * Retrieves the system service handling core backend connectivity and global states.

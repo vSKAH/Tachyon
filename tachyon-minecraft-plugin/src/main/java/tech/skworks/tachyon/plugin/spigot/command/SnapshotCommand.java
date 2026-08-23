@@ -7,6 +7,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.util.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import tech.skworks.tachyon.api.component.ComponentCodec;
+import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.services.SnapshotService;
 import tech.skworks.tachyon.service.contracts.snapshot.SnapshotTriggerType;
@@ -52,10 +54,11 @@ public class SnapshotCommand implements TabExecutor {
     }
 
     @Nullable
-    private <T extends Message> T fetchComponentByName(@NotNull UUID uuid, @NotNull String componentName) {
+    private <T extends Record> T fetchComponentByName(@NotNull UUID uuid, @NotNull String componentName) {
         final TachyonProfile profile = tachyonCore.getTachyonProfileRegistry().getProfile(uuid);
         if (profile == null) return null;
-        return profile.getComponent(componentName);
+        ComponentCodec<?> codec = tachyonCore.getComponentRegistry().getCodec(ComponentNamespace.parse(componentName));
+        return (T) profile.getComponent(codec.getComponentClass());
     }
 
     private @Nullable OfflinePlayer getOfflinePlayer(@NotNull final String targetName) {
@@ -158,7 +161,7 @@ public class SnapshotCommand implements TabExecutor {
                 });
     }
 
-    private <T extends Message> void takeComponentSnapshot(CommandSender sender, String targetName, UUID targetUniqueId, String reason, String componentName) {
+    private <T extends Record> void takeComponentSnapshot(CommandSender sender, String targetName, UUID targetUniqueId, String reason, String componentName) {
         T component = fetchComponentByName(targetUniqueId, componentName);
 
         if (component == null) {
@@ -199,7 +202,7 @@ public class SnapshotCommand implements TabExecutor {
             }
         } else if (args.length == 4) {
             if (args[0].equalsIgnoreCase("take") && args[1].equalsIgnoreCase("component")) {
-                suggestions.addAll(tachyonCore.getComponentRegistry().getRegisteredComponentsShortsNames());
+                suggestions.addAll(tachyonCore.getComponentRegistry().getAllCodecs().stream().map(s -> s.getComponentNamespace().toString()).toList());
             }
         }
 

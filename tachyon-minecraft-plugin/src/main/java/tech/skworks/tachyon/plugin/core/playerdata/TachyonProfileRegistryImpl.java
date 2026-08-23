@@ -3,19 +3,18 @@ package tech.skworks.tachyon.plugin.core.playerdata;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import tech.skworks.tachyon.api.component.ComponentCodec;
+import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.event.EventBus;
 import tech.skworks.tachyon.api.event.profile.ProfileLoadedEvent;
 import tech.skworks.tachyon.api.event.profile.ProfileUnloadedEvent;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
-import tech.skworks.tachyon.libs.com.google.protobuf.Any;
-import tech.skworks.tachyon.libs.com.google.protobuf.Message;
+import tech.skworks.tachyon.libs.org.bson.BsonDocument;
 import tech.skworks.tachyon.plugin.core.component.ComponentRegistryImpl;
-import tech.skworks.tachyon.plugin.core.event.TachyonEventBusImpl;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.core.metric.scraper.TachyonMetrics;
-import tech.skworks.tachyon.service.contracts.player.data.PullProfileResponse;
 
 import java.util.Collection;
 import java.util.Map;
@@ -56,22 +55,45 @@ public class TachyonProfileRegistryImpl implements TachyonProfileRegistry {
     }
 
     @Override
-    public void buildProfile(@NotNull final PullProfileResponse response, @NotNull final UUID uuid) {
-        TachyonProfileImpl profile = new TachyonProfileImpl(uuid);
+    public void buildProfile(@NotNull final BsonDocument response, @NotNull final UUID uuid) {
+        var profile = new TachyonProfileImpl(uuid, componentRegistryImpl);
 
-        int loaded = 0;
-        int skipped = 0;
+        var loaded = 0;
+        var skipped = 0;
 
-        for (Any any : response.getComponentsList()) {
-            Message message = componentRegistryImpl.unpack(any);
 
-            if (message != null) {
-                profile.initComponent(message);
+        if (!response.containsKey("components") || !response.isDocument("components")) {
+            LOGGER.error("Unable to find the 'components' section inside the response Document.");
+            return;
+        }
+
+        final var componentsDoc = response.getDocument("components");
+
+        for (var componentName : componentsDoc.keySet()) {
+            if (!componentsDoc.isDocument(componentName)) {
+                LOGGER.error("{} is not a document", componentName);
+                skipped++;
+                continue;
+            }
+
+            final BsonDocument componentBson = componentsDoc.getDocument(componentName);
+            final ComponentCodec<?> codec = componentRegistryImpl.getCodec(ComponentNamespace.parse(componentName));
+            if (codec == null) {
+                LOGGER.error("Could not find registered codec for component '{}' for player {} - is it registered via componentRegistry ?", componentName, uuid);
+                skipped++;
+                continue;
+            }
+
+            try {
+                Record component = codec.decode(componentBson);
+                profile.initComponent(component);
                 loaded++;
-            } else {
-                LOGGER.warn("Could not unpack component type '{}' for player {} — " + "is it registered via registry.register(...)?", any.getTypeUrl(), uuid);
+            } catch (Exception e) {
+                LOGGER.error("Failed to load component {} for player.", componentName, uuid);
                 skipped++;
             }
+
+
         }
 
         LOGGER.info("Profile loaded for {} — {} component(s) loaded, {} skipped.", uuid, loaded, skipped);

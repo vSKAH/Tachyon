@@ -55,8 +55,8 @@ class PlayerStartup {
         boolean exists = database.listCollectionNames().into(new ArrayList<>()).contains(playerConfig.collection());
         if (!exists) {
             database.createCollection(playerConfig.collection());
-            database.getCollection(playerConfig.collection()).createIndex(Indexes.ascending("uuid"), new IndexOptions().unique(true));
         }
+        database.getCollection(playerConfig.collection()).createIndex(Indexes.ascending("uuid"), new IndexOptions().unique(true));
         log.info("MongoDB indexes for Player module verified/created.");
     }
 }

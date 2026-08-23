@@ -46,7 +46,7 @@ import java.util.concurrent.TimeoutException;
  * @version 1.0
  * @since 1.0.0-SNAPSHOT
  */
-public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
+public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
     private static TachyonCore instance;
     private TachyonLogger logger;
@@ -231,7 +231,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI<ItemStack> {
     }
 
     @Override
-    public ComponentRegistry<ItemStack> getComponentRegistry() {
+    public ComponentRegistry getComponentRegistry() {
         return componentRegistryImpl;
     }
 

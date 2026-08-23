@@ -60,7 +60,7 @@ public interface SnapshotService {
      * @param <T>            The specific type of the Protobuf message.
      * @return A CompletableFuture that completes when the backend has successfully saved the specific snapshot.
      */
-    <T extends Message> CompletableFuture<Void> takeComponentSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason, @NotNull final SnapshotTriggerType triggerType, @NotNull final T component);
+    <T extends Record> CompletableFuture<Void> takeComponentSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason, @NotNull final SnapshotTriggerType triggerType, @NotNull final T component);
 
 
     /**

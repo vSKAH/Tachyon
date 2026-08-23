@@ -1,13 +1,20 @@
 package tech.skworks.tachyon.plugin.core.playerdata;
 
+import com.google.common.collect.Maps;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.services.PlayerDataService;
-import tech.skworks.tachyon.libs.com.google.protobuf.Any;
-import tech.skworks.tachyon.libs.com.google.protobuf.Message;
+import tech.skworks.tachyon.libs.io.grpc.CallOptions;
 import tech.skworks.tachyon.libs.io.grpc.Status;
 import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
+import tech.skworks.tachyon.libs.io.grpc.stub.ClientCalls;
+import tech.skworks.tachyon.libs.org.bson.BsonArray;
+import tech.skworks.tachyon.libs.org.bson.BsonDocument;
+import tech.skworks.tachyon.libs.org.bson.BsonString;
+import tech.skworks.tachyon.libs.org.bson.RawBsonDocument;
+import tech.skworks.tachyon.plugin.core.grpc.marshaller.BsonMarshaller;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.retry.RetryQueue;
 import tech.skworks.tachyon.plugin.core.grpc.AbstractGrpcService;
@@ -16,7 +23,6 @@ import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.core.grpc.BackendStubProvider;
 import tech.skworks.tachyon.plugin.core.metric.scraper.TachyonMetrics;
 import tech.skworks.tachyon.plugin.common.retry.RetryTask;
-import tech.skworks.tachyon.service.contracts.player.data.*;
 
 import java.io.File;
 import java.io.IOException;
@@ -65,14 +71,23 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
     }
 
     @Override
-    public @Nullable PullProfileResponse tryPullProfile(@NotNull final UUID uuid) {
+    public @Nullable BsonDocument tryPullProfile(@NotNull final UUID uuid) {
         int attempts = 0;
-        PullProfileResponse playerResponse = null;
+
+        BsonDocument requestDoc = new BsonDocument("uuid", new BsonString(uuid.toString()));
+        RawBsonDocument rawRequest = BsonMarshaller.toRawBsonDocument(requestDoc);
+
+        BsonDocument playerResponse = null;
         try (var _ = startTimer("GetPlayer")) {
             while (playerResponse == null && attempts < 6) {
                 attempts++;
                 try {
-                    playerResponse = backendStubProvider.getPlayerDataStub(4).pullProfile(PullProfileRequest.newBuilder().setUuid(uuid.toString()).build());
+                    playerResponse = ClientCalls.blockingUnaryCall(
+                            backendStubProvider.getChannel(),
+                            PlayerDataContract.PULL_PROFILE_METHOD,
+                            CallOptions.DEFAULT.withDeadlineAfter(4, TimeUnit.SECONDS),
+                            rawRequest
+                    );
                 } catch (StatusRuntimeException e) {
                     Status status = e.getStatus();
                     if (status.getCode() == Status.Code.CANCELLED) {
@@ -116,23 +131,36 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
         final UUID uuid = tachyonProfile.getUuid();
         final String strUuid = uuid.toString();
 
-        final List<Message> toSave = tachyonProfile.extractDirtyComponents();
-        final Collection<Class<? extends Message>> savedClasses = toSave.stream().<Class<? extends Message>>map(Message::getClass).toList();
-        final Collection<Any> packed = toSave.stream().map(Any::pack).toList();
-        final Collection<String> toRemove = tachyonProfile.extractDeletedComponentsUrls();
-        final PushProfileRequest request = PushProfileRequest.newBuilder().setUuid(strUuid)
-                .addAllComponentsToSave(packed)
-                .addAllComponentsToRemove(toRemove).build();
+        final BsonDocument rootDoc = new BsonDocument("uuid", new BsonString(strUuid));
 
-        final int count = packed.size() + toRemove.size();
+
+        BsonDocument saveDoc = new BsonDocument();
+        Map<ComponentNamespace, BsonDocument> dirty = Map.copyOf(tachyonProfile.extractDirtyComponents());
+        dirty.forEach((namespace, document) -> saveDoc.append(namespace.toString(), document));
+        rootDoc.append("save", saveDoc);
+
+        BsonArray removeArray = new BsonArray();
+        tachyonProfile.extractDeletedComponents().forEach(name -> removeArray.add(new BsonString(name.toString())));
+        rootDoc.append("remove", removeArray);
+
+        final int count = saveDoc.size() + removeArray.size();
+
+        RawBsonDocument rawRequest = BsonMarshaller.toRawBsonDocument(rootDoc);
 
         RetryQueue queue = createQueue(uuid, new RetryTask(uuid) {
             @Override
             public boolean execute() {
                 try (var _ = startTimer("SaveProfile")) {
-                    backendStubProvider.getPlayerDataStub(4).pushProfile(request);
 
-                    tachyonProfile.markAsClean(savedClasses, toRemove);
+                    ClientCalls.blockingUnaryCall(
+                            backendStubProvider.getChannel(),
+                            PlayerDataContract.PUSH_PROFILE_METHOD,
+                            CallOptions.DEFAULT.withDeadlineAfter(4, TimeUnit.SECONDS),
+                            rawRequest
+                            );
+
+                    //TODO: Mark as clean
+                   // tachyonProfile.markAsClean(dirty, removeArray);
                     future.complete(null);
                     return true;
 
@@ -157,7 +185,7 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
 
             @Override
             public byte[] getPayload() {
-                return request.toByteArray();
+                return rawRequest.getBackingArray();
             }
 
             @Override
@@ -300,11 +328,11 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
         LOGGER.info("[RECOVERY] Replaying {} pending recovery file(s) to backend.", binFiles.size());
 
         for (final Path file : binFiles) {
-            replaySingleRecoveryFile(file);
+         //   replaySingleRecoveryFile(file);
         }
     }
 
-    private void replaySingleRecoveryFile(@NotNull final Path file) {
+    /*private void replaySingleRecoveryFile(@NotNull final Path file) {
         final byte[] bytes;
         final PushProfileRequest request;
         final UUID uuid;
@@ -361,6 +389,8 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
         });
     }
 
+
+     */
     public boolean hasRecoveryBinary() {
         final Path datasFolder = RecoveryLayout.dataDir(pluginDataFolder.toPath());
         if (!Files.isDirectory(datasFolder)) return false;

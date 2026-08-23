@@ -10,11 +10,10 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
 import tech.skworks.tachyon.api.services.PlayerDataService;
+import tech.skworks.tachyon.libs.org.bson.BsonDocument;
 import tech.skworks.tachyon.plugin.core.metric.scraper.VanillaMetrics;
-import tech.skworks.tachyon.plugin.core.playerdata.PlayerDataConfig;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
-import tech.skworks.tachyon.service.contracts.player.data.PullProfileResponse;
 
 import java.util.UUID;
 
@@ -44,7 +43,7 @@ public class ConnectionListener implements Listener {
         LOGGER.info("Processing pre-login for {} ({})", event.getName(), uuid);
 
         try {
-            PullProfileResponse playerResponse = plugin.getPlayerDataService().tryPullProfile(uuid);
+            BsonDocument playerResponse = plugin.getPlayerDataService().tryPullProfile(uuid);
 
             if (playerResponse == null) {
                 LOGGER.error("Profile load returned null for {} ({}) — kicking.", event.getName(), uuid);
