@@ -1,12 +1,9 @@
-package tech.skworks.tachyon.api.services;
+package tech.skworks.tachyon.api.snapshot;
 
 import org.jetbrains.annotations.NotNull;
-import tech.skworks.tachyon.service.contracts.snapshot.DecodeSnapshotResponse;
-import tech.skworks.tachyon.service.contracts.snapshot.ListSnapshotsResponse;
-import tech.skworks.tachyon.service.contracts.snapshot.SnapshotTriggerType;
-import tech.skworks.tachyon.libs.com.google.protobuf.Message;
-import tech.skworks.tachyon.service.contracts.snapshot.ToggleLockSnapshotResponse;
 
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -73,10 +70,10 @@ public interface SnapshotService {
      *
      * @param snapshotId       The unique identifier (ObjectId hex string) of the target snapshot. Must not be null.
      * @param executorUniqueId The unique identifier (e.g., UUID) of the administrator or system executing this action. Must not be null.
-     * @return A {@link CompletableFuture} that, when successfully completed, yields a {@link ToggleLockSnapshotResponse}
+     * @return A {@link CompletableFuture} that, when successfully completed, yields a boolean
      * containing the newly applied lock status.
      */
-    CompletableFuture<ToggleLockSnapshotResponse> toggleSnapshotLocking(@NotNull final String snapshotId, @NotNull final String executorUniqueId);
+    CompletableFuture<Boolean> toggleSnapshotLocking(@NotNull final String snapshotId, @NotNull final String executorUniqueId);
 
     /**
      * Retrieves the metadata history of all snapshots associated with a specific player.
@@ -88,7 +85,7 @@ public interface SnapshotService {
      * @param playerUniqueId The UUID of the player whose snapshot history is being requested.
      * @return A CompletableFuture containing the response with the list of snapshot metadata.
      */
-    CompletableFuture<ListSnapshotsResponse> getSnapshots(@NotNull final String playerUniqueId);
+    CompletableFuture<List<SnapshotInfo>> getSnapshots(@NotNull final String playerUniqueId);
 
 
     /**
@@ -102,6 +99,6 @@ public interface SnapshotService {
      * @param snapshotId The unique MongoDB ObjectId string of the snapshot to retrieve.
      * @return A CompletableFuture containing the decoded snapshot data payload.
      */
-    CompletableFuture<DecodeSnapshotResponse> decodeSnapshot(@NotNull final String snapshotId);
+    <T extends Record> CompletableFuture<Map<String, T>> decodeSnapshot(@NotNull final String snapshotId);
 
 }

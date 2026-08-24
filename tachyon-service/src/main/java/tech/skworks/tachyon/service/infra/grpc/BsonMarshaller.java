@@ -1,7 +1,12 @@
 package tech.skworks.tachyon.service.infra.grpc;
 
 import io.grpc.*;
+import org.bson.BsonBinaryWriter;
+import org.bson.BsonDocument;
 import org.bson.RawBsonDocument;
+import org.bson.codecs.BsonDocumentCodec;
+import org.bson.codecs.EncoderContext;
+import org.bson.io.BasicOutputBuffer;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -37,6 +42,14 @@ public class BsonMarshaller implements MethodDescriptor.Marshaller<RawBsonDocume
         } catch (Exception e) {
             throw new StatusRuntimeException(Status.INTERNAL.withCause(e).withDescription("Failed to parse BSON"));
         }
+    }
+
+    public static RawBsonDocument toRawBsonDocument(BsonDocument document) {
+        BasicOutputBuffer buffer = new BasicOutputBuffer();
+        try (BsonBinaryWriter writer = new BsonBinaryWriter(buffer)) {
+            new BsonDocumentCodec().encode(writer, document, EncoderContext.builder().build());
+        }
+        return new RawBsonDocument(buffer.toByteArray());
     }
 
     private static final class BsonFastStream extends ByteArrayInputStream implements KnownLength, Drainable {

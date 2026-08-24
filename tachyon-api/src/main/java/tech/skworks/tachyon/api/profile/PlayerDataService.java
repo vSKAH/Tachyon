@@ -1,8 +1,7 @@
-package tech.skworks.tachyon.api.services;
+package tech.skworks.tachyon.api.profile;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.libs.org.bson.BsonDocument;
 
 import java.util.UUID;

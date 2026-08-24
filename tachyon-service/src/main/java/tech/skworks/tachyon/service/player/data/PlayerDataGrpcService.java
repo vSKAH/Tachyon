@@ -99,7 +99,7 @@ public class PlayerDataGrpcService implements BindableService {
                                 responseObserver.onNext(response);
                                 responseObserver.onCompleted();
                             },
-                            error -> responseObserver.onError(error)
+                            responseObserver::onError
                     );
                 }))
                 .addMethod(PUSH_PROFILE_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
@@ -108,7 +108,7 @@ public class PlayerDataGrpcService implements BindableService {
                                 responseObserver.onNext(response);
                                 responseObserver.onCompleted();
                             },
-                            error -> responseObserver.onError(error)
+                            responseObserver::onError
                     );
                 }))
                 .build();

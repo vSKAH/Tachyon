@@ -1,17 +1,11 @@
 package tech.skworks.tachyon.service.snapshot;
 
-import com.github.luben.zstd.Zstd;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.protobuf.*;
-import com.google.protobuf.util.JsonFormat;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Projections;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.Updates;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
+import io.grpc.*;
+import io.grpc.stub.ServerCalls;
 import io.quarkus.grpc.GrpcService;
 import io.quarkus.mongodb.FindOptions;
 import io.quarkus.mongodb.reactive.ReactiveMongoClient;
@@ -21,34 +15,32 @@ import io.quarkus.redis.datasource.stream.ReactiveStreamCommands;
 import io.quarkus.redis.datasource.stream.XAddArgs;
 import io.smallrye.common.annotation.NonBlocking;
 import io.smallrye.mutiny.Uni;
-import io.smallrye.mutiny.infrastructure.Infrastructure;
 import jakarta.annotation.PostConstruct;
 import jakarta.inject.Inject;
-import org.bson.Document;
+import org.bson.*;
 import org.bson.conversions.Bson;
-import org.bson.types.Binary;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.service.contracts.snapshot.*;
-import tech.skworks.tachyon.service.infra.DynamicProtobufRegistry;
+import tech.skworks.tachyon.service.infra.grpc.BsonMarshaller;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
  * Project Tachyon
  * Class SnapshotGrpcService
+ * Pure BSON Snapshot gRPC Service
  *
  * @author  Jimmy (vSKAH) - 06/04/2026
- * @version 1.0
+ * @version 2.0
  * @since 1.0.0-SNAPSHOT
  */
 @GrpcService
 @NonBlocking
-public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServiceImplBase {
+public class SnapshotGrpcService implements BindableService {
 
     @Inject
     Logger logger;
@@ -56,17 +48,15 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
     SnapshotConfig snapshotConfig;
 
     @Inject
-    DynamicProtobufRegistry protobufRegistry;
-
-    @Inject
     ReactiveMongoClient mongoClient;
+
     @ConfigProperty(name = "quarkus.mongodb.database")
     String databaseName;
 
     private ReactiveMongoCollection<Document> snapshotCollection;
 
     private final ReactiveStreamCommands<String, String, byte[]> redisStream;
-    private static final XAddArgs STREAM_ARGS = new XAddArgs().maxlen(20000L).nearlyExactTrimming();
+    private static final XAddArgs STREAM_ARGS = new XAddArgs().maxlen(50000L).nearlyExactTrimming();
 
     public SnapshotGrpcService(ReactiveRedisDataSource redisDS) {
         this.redisStream = redisDS.stream(byte[].class);
@@ -78,6 +68,97 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
         this.logger.debug("SnapshotGrpcService collections initialized.");
     }
 
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> TAKE_DATABASE_SNAPSHOT =
+            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
+                    .setType(MethodDescriptor.MethodType.UNARY)
+                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.SnapshotGrpcService", "TakeDatabaseSnapshot"))
+                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
+                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
+                    .build();
+
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> TAKE_COMPONENT_SNAPSHOT =
+            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
+                    .setType(MethodDescriptor.MethodType.UNARY)
+                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.SnapshotGrpcService", "TakeComponentSnapshot"))
+                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
+                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
+                    .build();
+
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> TOGGLE_SNAPSHOT_LOCK =
+            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
+                    .setType(MethodDescriptor.MethodType.UNARY)
+                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.SnapshotGrpcService", "ToggleSnapshotLock"))
+                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
+                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
+                    .build();
+
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> LIST_SNAPSHOT =
+            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
+                    .setType(MethodDescriptor.MethodType.UNARY)
+                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.SnapshotGrpcService", "ListSnapshot"))
+                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
+                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
+                    .build();
+
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> DECODE_SNAPSHOT =
+            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
+                    .setType(MethodDescriptor.MethodType.UNARY)
+                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.SnapshotGrpcService", "DecodeSnapshot"))
+                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
+                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
+                    .build();
+
+    @Override
+    public ServerServiceDefinition bindService() {
+        return ServerServiceDefinition.builder("tech.skworks.tachyon.SnapshotGrpcService")
+                .addMethod(TAKE_DATABASE_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                    takeDatabaseSnapshot(request).subscribe().with(
+                            response -> {
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                            },
+                            responseObserver::onError
+                    );
+                }))
+                .addMethod(TAKE_COMPONENT_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                    takeComponentSnapshot(request).subscribe().with(
+                            response -> {
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                            },
+                            responseObserver::onError
+                    );
+                }))
+                .addMethod(TOGGLE_SNAPSHOT_LOCK, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                    toggleLockSnapshot(request).subscribe().with(
+                            response -> {
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                            },
+                            responseObserver::onError
+                    );
+                }))
+                .addMethod(LIST_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                    listSnapshots(request).subscribe().with(
+                            response -> {
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                            },
+                            responseObserver::onError
+                    );
+                }))
+                .addMethod(DECODE_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                    decodeSnapshot(request).subscribe().with(
+                            response -> {
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                            },
+                            responseObserver::onError
+                    );
+                }))
+                .build();
+    }
+
     private Uni<ObjectId> parseObjectId(String snapshotId) {
         try {
             return Uni.createFrom().item(new ObjectId(snapshotId));
@@ -87,11 +168,14 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
         }
     }
 
-    @Override
-    public Uni<ToggleLockSnapshotResponse> toggleLockSnapshot(ToggleLockSnapshotRequest request) {
+    public Uni<RawBsonDocument> toggleLockSnapshot(RawBsonDocument request) {
+        if (!request.containsKey("snapshot_id")) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("snapshot_id is required").asRuntimeException());
+        }
+        final String snapshotId = request.getString("snapshot_id").getValue();
+        final String lockerId = request.containsKey("locker_id") ? request.getString("locker_id").getValue() : "SYSTEM";
 
-        final String lockerId = request.getLockerId();
-        return parseObjectId(request.getSnapshotId())
+        return parseObjectId(snapshotId)
                 .chain(objectId -> {
                     Bson filter = Filters.eq("_id", objectId);
 
@@ -107,18 +191,21 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
                                 );
 
                                 return snapshotCollection.updateOne(filter, updates)
-                                        .chain((result) -> {
+                                        .chain(result -> {
                                             if (result.getModifiedCount() == 0) {
                                                 return Uni.createFrom().failure(new StatusRuntimeException(Status.ABORTED.withDescription("The snapshot was not modified.")));
                                             }
-                                            return Uni.createFrom().item(ToggleLockSnapshotResponse.newBuilder().setLockStatus(newLockStatus).build());
+                                            BsonDocument respDoc = new BsonDocument()
+                                                    .append("snapshot_id", new BsonString(snapshotId))
+                                                    .append("locked", new BsonBoolean(newLockStatus));
+                                            return Uni.createFrom().item(BsonMarshaller.toRawBsonDocument(respDoc));
                                         })
-                                        .onFailure().invoke((e) -> {
+                                        .onFailure().invoke(e -> {
                                             if (!(e instanceof StatusRuntimeException)) {
                                                 logger.error("Database error occurred during snapshot locking", e);
                                             }
                                         })
-                                        .onFailure().transform((e) -> {
+                                        .onFailure().transform(e -> {
                                             if (e instanceof StatusRuntimeException) return e;
                                             return Status.INTERNAL.withCause(e).withDescription("Database error occurred").asRuntimeException();
                                         });
@@ -126,58 +213,56 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
                 });
     }
 
-    @Override
-    public Uni<Empty> takeDatabaseSnapshot(TakeDatabaseSnapshotRequest req) {
+    public Uni<RawBsonDocument> takeDatabaseSnapshot(RawBsonDocument req) {
+        if (!req.containsKey("uuid")) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("uuid is required").asRuntimeException());
+        }
         Map<String, byte[]> payload = new HashMap<>();
         payload.put("granularity", "FULL".getBytes(StandardCharsets.UTF_8));
-        payload.put("global_payload", req.toByteArray());
+        payload.put("global_payload", toByteArray(req));
 
         return pushToStream(payload);
     }
 
-    @Override
-    public Uni<Empty> takeComponentSnapshot(TakeComponentSnapshotRequest req) {
-        if (req.getRawData().isEmpty()) {
-            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("Raw data is required for specific snapshots.").asRuntimeException());
+    public Uni<RawBsonDocument> takeComponentSnapshot(RawBsonDocument req) {
+        if (!req.containsKey("uuid") || !req.containsKey("target_component")) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("uuid and target_component are required for specific snapshots.").asRuntimeException());
         }
 
         Map<String, byte[]> payload = new HashMap<>();
         payload.put("granularity", "SPECIFIC_COMPONENT".getBytes(StandardCharsets.UTF_8));
-        payload.put("specific_payload", req.toByteArray());
+        payload.put("specific_payload", toByteArray(req));
         return pushToStream(payload);
     }
 
-    private Uni<Empty> pushToStream(Map<String, byte[]> payload) {
+    private Uni<RawBsonDocument> pushToStream(Map<String, byte[]> payload) {
         payload.put("source", "EXTERNAL".getBytes(StandardCharsets.UTF_8));
         payload.put("timestamp", String.valueOf(System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8));
 
         return redisStream.xadd(snapshotConfig.streamKey(), STREAM_ARGS, payload)
-                .replaceWith(Empty.getDefaultInstance())
+                .replaceWith(emptyBsonResponse())
                 .onFailure().invoke(e -> logger.error("Redis Stream Error", e))
                 .onFailure().transform(e -> Status.UNAVAILABLE.withDescription("The snapshot buffer (Redis) is currently unavailable.").withCause(e).asRuntimeException());
     }
 
-
-    @Override
-    public Uni<ListSnapshotsResponse> listSnapshots(ListSnapshotsRequest req) {
-        if (req.getPlayerId().isBlank()) {
-            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("UUID is required").asRuntimeException());
+    public Uni<RawBsonDocument> listSnapshots(RawBsonDocument req) {
+        if (!req.containsKey("uuid")) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("uuid is required").asRuntimeException());
         }
+        final String uuid = req.getString("uuid").getValue();
 
-        return snapshotCollection.find(Filters.eq("uuid", req.getPlayerId()), new FindOptions()
+        return snapshotCollection.find(Filters.eq("uuid", uuid), new FindOptions()
                         .sort(Sorts.descending("timestamp"))
-                        .projection(Projections.exclude("data", "uuid")))
+                        .projection(Projections.exclude("components", "data")))
                 .collect().asList().onFailure().transform(e -> {
-                    logger.errorf(e, "Failed to fetch snapshots for player %s", req.getPlayerId());
+                    logger.errorf(e, "Failed to fetch snapshots for player %s", uuid);
                     return Status.INTERNAL.withDescription("Database error occurred").withCause(e).asRuntimeException();
                 }).map(docs -> {
-                    ListSnapshotsResponse.Builder response = ListSnapshotsResponse.newBuilder().setPlayerId(req.getPlayerId());
+                    BsonArray snapshotsArray = new BsonArray();
 
                     for (Document document : docs) {
                         try {
-                            String typeStr = document.getString("type");
-                            SnapshotTriggerType type = (typeStr != null) ? SnapshotTriggerType.valueOf(typeStr) : SnapshotTriggerType.SNAPSHOT_TRIGGER_UNSPECIFIED;
-
+                            String typeStr = document.getString("trigger_type");
                             Number timestampNum = document.get("timestamp", Number.class);
                             long timestamp = (timestampNum != null) ? timestampNum.longValue() : 0L;
 
@@ -185,162 +270,80 @@ public class SnapshotGrpcService extends MutinySnapshotServiceGrpc.SnapshotServi
                             String source = document.getString("source");
                             String granularity = document.getString("granularity");
 
-                            response.addSnapshots(SnapshotInfo.newBuilder()
-                                    .setSnapshotId(document.getObjectId("_id").toHexString())
-                                    .setTriggerType(type)
-                                    .setTimestamp(timestamp)
-                                    .setReason(reason != null ? reason : "N/A")
-                                    .setSource(source != null ? source : "UNKNOWN")
-                                    .setGranularity(granularity != null ? granularity : "FULL")
-                                    .setLocked(document.getBoolean("locked", false))
-                                    .build());
+                            BsonDocument snapDoc = new BsonDocument()
+                                    .append("snapshot_id", new BsonString(document.getObjectId("_id").toHexString()))
+                                    .append("trigger_type", new BsonString(typeStr != null ? typeStr : "UNKNOWN"))
+                                    .append("timestamp", new BsonInt64(timestamp))
+                                    .append("reason", new BsonString(reason != null ? reason : "N/A"))
+                                    .append("source", new BsonString(source != null ? source : "UNKNOWN"))
+                                    .append("granularity", new BsonString(granularity != null ? granularity : "FULL"))
+                                    .append("locked", new BsonBoolean(document.getBoolean("locked", false)));
+
+                            snapshotsArray.add(snapDoc);
 
                         } catch (Exception e) {
                             logger.warnf("Skipping corrupted snapshot document %s: %s", document.getObjectId("_id"), e.getMessage());
                         }
                     }
 
-                    return response.build();
+                    BsonDocument responseDoc = new BsonDocument()
+                            .append("uuid", new BsonString(uuid))
+                            .append("snapshots", snapshotsArray);
+
+                    return BsonMarshaller.toRawBsonDocument(responseDoc);
                 });
     }
 
-
-    @Override
-    public Uni<DecodeSnapshotResponse> decodeSnapshot(DecodeSnapshotRequest req) {
-        final String snapshotId = req.getSnapshotId();
+    public Uni<RawBsonDocument> decodeSnapshot(RawBsonDocument req) {
+        if (!req.containsKey("snapshot_id")) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("snapshot_id is required").asRuntimeException());
+        }
+        final String snapshotId = req.getString("snapshot_id").getValue();
 
         return parseObjectId(snapshotId)
-                .chain(objectId -> fetchSnapshotDocument(objectId, snapshotId))
-                .chain(doc -> extractAndDecompressPayload(doc)
-                        .chain(decompressedBytes -> buildResponse(doc, snapshotId, decompressedBytes)))
+                .chain(objectId -> snapshotCollection.find(Filters.eq("_id", objectId)).collect().first()
+                        .onItem().ifNull().failWith(() -> Status.NOT_FOUND.withDescription("This snapshot does not exist in the database.").asRuntimeException())
+                        .onFailure(e -> !(e instanceof StatusRuntimeException))
+                        .transform(e -> {
+                            logger.errorf(e, "Database error while fetching snapshot %s", snapshotId);
+                            return Status.INTERNAL.withDescription("Database error occurred").withCause(e).asRuntimeException();
+                        }))
+                .map(doc -> {
+                    String granularity = doc.getString("granularity");
+                    String uuid = doc.getString("uuid");
+                    Number timestampNum = doc.get("timestamp", Number.class);
+                    long timestamp = timestampNum != null ? timestampNum.longValue() : 0L;
+
+                    BsonDocument response = new BsonDocument()
+                            .append("snapshot_id", new BsonString(snapshotId))
+                            .append("uuid", new BsonString(uuid != null ? uuid : ""))
+                            .append("granularity", new BsonString(granularity != null ? granularity : "FULL"))
+                            .append("timestamp", new BsonInt64(timestamp));
+
+                    if (doc.containsKey("components")) {
+                        Document componentsDoc = doc.get("components", Document.class);
+                        if (componentsDoc != null) {
+                            response.append("components", BsonDocument.parse(componentsDoc.toJson()));
+                        } else {
+                            response.append("components", new BsonDocument());
+                        }
+                    } else {
+                        response.append("components", new BsonDocument());
+                    }
+
+                    return BsonMarshaller.toRawBsonDocument(response);
+                })
                 .onFailure().invoke(e -> logger.errorf("Failed to process ViewSnapshot request for ID: %s. Reason: %s", snapshotId, e.getMessage()));
     }
 
-    private Uni<Document> fetchSnapshotDocument(ObjectId objectId, String snapshotId) {
-        return snapshotCollection.find(Filters.eq("_id", objectId)).collect().first()
-                .onItem().ifNull().failWith(() -> Status.NOT_FOUND.withDescription("This snapshot does not exist in the database.").asRuntimeException())
-                .onFailure(e -> !(e instanceof io.grpc.StatusRuntimeException))
-                .transform(e -> {
-                    logger.errorf(e, "Database error while fetching snapshot %s", snapshotId);
-                    return Status.INTERNAL.withDescription("Database error occurred").withCause(e).asRuntimeException();
-                });
+    private static byte[] toByteArray(RawBsonDocument doc) {
+        ByteBuffer nio = doc.getByteBuffer().asNIO().duplicate();
+        byte[] bytes = new byte[nio.remaining()];
+        nio.get(bytes);
+        return bytes;
     }
 
-    private Uni<byte[]> extractAndDecompressPayload(Document doc) {
-        final Binary binary = doc.get("data", Binary.class);
-        if (binary == null) {
-            return Uni.createFrom().failure(Status.DATA_LOSS.withDescription("Snapshot document is missing the 'data' field.").asRuntimeException());
-        }
-        return Uni.createFrom().item(() -> decompressPayload(binary.getData())).runSubscriptionOn(Infrastructure.getDefaultWorkerPool());
-    }
-
-    private Uni<DecodeSnapshotResponse> buildResponse(Document doc, String snapshotId, byte[] decompressedBytes) {
-        final String granularity = doc.getString("granularity");
-
-        if (granularity == null) {
-            return Uni.createFrom().failure(Status.DATA_LOSS.withDescription("Snapshot document is missing the 'granularity' field.").asRuntimeException());
-        }
-
-        try {
-            if (granularity.equalsIgnoreCase("FULL")) {
-                return processFullSnapshot(snapshotId, decompressedBytes);
-            } else if (granularity.equalsIgnoreCase("SPECIFIC_COMPONENT")) {
-                return processSpecificSnapshot(doc, snapshotId, decompressedBytes);
-            } else {
-                return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("Unknown granularity: " + granularity).asRuntimeException());
-            }
-        } catch (Exception e) {
-            logger.errorf(e, "Data parsing corrupted for snapshot (ID: %s, Granularity: %s)", snapshotId, granularity);
-            return Uni.createFrom().failure(Status.DATA_LOSS.withDescription("Snapshot data is corrupted or cannot be parsed.").asRuntimeException());
-        }
-    }
-
-    private Uni<DecodeSnapshotResponse> processSpecificSnapshot(Document doc, String snapshotId, byte[] decompressedBytes) {
-        final String targetComponent = doc.getString("target_component");
-        if (targetComponent == null) {
-            return Uni.createFrom().failure(Status.DATA_LOSS.withDescription("Specific Snapshot is missing the 'target_component' field in database.").asRuntimeException());
-        }
-        final Any componentAny = Any.newBuilder().setTypeUrl(DynamicProtobufRegistry.rebuildTypeUrl(targetComponent)).setValue(ByteString.copyFrom(decompressedBytes)).build();
-        final DecodeSnapshotResponse response = DecodeSnapshotResponse.newBuilder().setSnapshotId(snapshotId).putComponents(targetComponent, componentAny).build();
-        return Uni.createFrom().item(response);
-    }
-
-
-    private Uni<DecodeSnapshotResponse> processFullSnapshot(String snapshotId, byte[] decompressedBytes) {
-        final DecodeSnapshotResponse.Builder response = DecodeSnapshotResponse.newBuilder().setSnapshotId(snapshotId);
-
-        final String jsonPayload = new String(decompressedBytes, StandardCharsets.UTF_8);
-        final JsonObject document = JsonParser.parseString(jsonPayload).getAsJsonObject();
-
-        if (!document.has("components")) {
-            return Uni.createFrom().failure(Status.DATA_LOSS.withDescription("Unable to find 'components' section inside the FULL snapshot: " + snapshotId).asRuntimeException());
-        }
-
-        JsonObject componentsJson = document.getAsJsonObject("components");
-        for (Map.Entry<String, JsonElement> entry : componentsJson.entrySet()) {
-            JsonObject componentData = entry.getValue().getAsJsonObject();
-
-            if (componentData.has("$binary")) {
-                JsonObject binaryObj = componentData.getAsJsonObject("$binary");
-                if (binaryObj.has("base64")) {
-                    String base64 = binaryObj.get("base64").getAsString();
-                    try {
-                        byte[] bytes = Base64.getDecoder().decode(base64);
-                        Any any = Any.parseFrom(bytes);
-                        response.putComponents(any.getTypeUrl(), any);
-                        continue;
-                    } catch (Exception e) {
-                        logger.warnf(e, "Failed to parse binary component in snapshot %s for key %s", snapshotId, entry.getKey());
-                    }
-                }
-            }
-
-            if (!componentData.has("@type")) {
-                logger.warnf("Missing '@type' in 'components.%s' of snapshot: %s", entry.getKey(), snapshotId);
-                continue;
-            }
-
-            final String typeName = componentData.get("@type").getAsString();
-            final Any component = buildComponent(snapshotId, typeName, componentData);
-            response.putComponents(typeName, component);
-        }
-
-        return Uni.createFrom().item(response.build());
-    }
-
-    private Any buildComponent(final String snapshotId, final String typeName, final JsonObject datas) {
-        Descriptors.Descriptor descriptor = protobufRegistry.findDescriptor(typeName);
-        if (descriptor == null) {
-            throw Status.DATA_LOSS.withDescription("Descriptor not found for type " + typeName + " (Snapshot ID: " + snapshotId + ")").asRuntimeException();
-        }
-        final DynamicMessage.Builder dynamicBuilder = DynamicMessage.newBuilder(descriptor);
-        try {
-            JsonFormat.parser().ignoringUnknownFields().merge(datas.toString(), dynamicBuilder);
-            return Any.pack(dynamicBuilder.build());
-        } catch (InvalidProtocolBufferException e) {
-            throw Status.INTERNAL.withDescription("Failed to build component for type " + typeName + " (Snapshot ID: " + snapshotId + ")").asRuntimeException();
-        }
-    }
-
-    private byte[] decompressPayload(byte[] data) {
-        try {
-            long expectedSize = Zstd.getFrameContentSize(data, 0, data.length, false);
-
-            if (expectedSize < 0) {
-                throw Status.INTERNAL.withDescription("Zstd metadata error: Invalid frame header.").asRuntimeException();
-            }
-            if (expectedSize == 0) {
-                throw Status.DATA_LOSS.withDescription("Zstd metadata error: Original size is unknown.").asRuntimeException();
-            }
-
-            return Zstd.decompress(data, (int) expectedSize);
-
-        } catch (Exception e) {
-            if (e instanceof RuntimeException && Status.fromThrowable(e).getCode() != Status.Code.UNKNOWN) {
-                throw (RuntimeException) e;
-            }
-            logger.error("Error decompressing snapshot data", e);
-            throw Status.INTERNAL.withDescription("Failed to decompress snapshot: " + e.getMessage()).asRuntimeException();
-        }
+    private static RawBsonDocument emptyBsonResponse() {
+        return BsonMarshaller.toRawBsonDocument(new BsonDocument());
     }
 }

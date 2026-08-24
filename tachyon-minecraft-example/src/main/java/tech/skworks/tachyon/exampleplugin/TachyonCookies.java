@@ -8,8 +8,6 @@ import org.bukkit.plugin.java.JavaPlugin;
 import tech.skworks.tachyon.api.TachyonAPI;
 import tech.skworks.tachyon.api.component.ComponentPreviewHandler;
 import tech.skworks.tachyon.exampleplugin.component.CookieComponent;
-import tech.skworks.tachyon.exampleplugin.component.CookieComponentBuilder;
-import tech.skworks.tachyon.libs.com.google.protobuf.Message;
 
 /**
  * Project Tachyon

@@ -1,7 +1,5 @@
 package tech.skworks.tachyon.service.snapshot;
 
-import com.github.luben.zstd.Zstd;
-import com.google.protobuf.InvalidProtocolBufferException;
 import com.mongodb.client.model.Filters;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -12,16 +10,12 @@ import io.quarkus.redis.datasource.stream.*;
 import io.quarkus.scheduler.Scheduled;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
-import io.smallrye.mutiny.infrastructure.Infrastructure;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.bson.Document;
-import org.bson.types.Binary;
+import org.bson.*;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.service.contracts.snapshot.TakeComponentSnapshotRequest;
-import tech.skworks.tachyon.service.contracts.snapshot.TakeDatabaseSnapshotRequest;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
 import java.nio.charset.StandardCharsets;
@@ -32,12 +26,12 @@ import java.util.concurrent.TimeUnit;
 /**
  * Project Tachyon
  * Class SnapshotStreamWorker
+ * Pure BSON Snapshot Stream Processor
  *
  * @author  Jimmy (vSKAH) - 15/04/2026
- * @version 1.0
+ * @version 2.0
  * @since 1.0.0-SNAPSHOT
  */
-
 @ApplicationScoped
 public class SnapshotStreamWorker {
 
@@ -154,46 +148,59 @@ public class SnapshotStreamWorker {
 
             try {
                 if (specificPayloads != null) {
-                    TakeComponentSnapshotRequest request = TakeComponentSnapshotRequest.parseFrom(specificPayloads);
+                    RawBsonDocument request = new RawBsonDocument(specificPayloads);
                     return handleComponentSnapshot(granularity, source, timestamp, request).replaceWith(msg.id());
                 } else if (globalPayload != null) {
-                    TakeDatabaseSnapshotRequest request = TakeDatabaseSnapshotRequest.parseFrom(globalPayload);
+                    RawBsonDocument request = new RawBsonDocument(globalPayload);
                     return handleDatabaseSnapshot(granularity, source, timestamp, request).replaceWith(msg.id());
                 }
 
                 log.warnf("[SnapshotStreamWorker] Message %s has no payloads. Poison pill detected. Discarding.", msg.id());
                 return Uni.createFrom().item(msg.id());
 
-            } catch (InvalidProtocolBufferException e) {
-                log.errorf("[SnapshotStreamWorker] Protobuf parsing failed for message %s. Poison pill detected. Discarding.", msg.id());
+            } catch (Exception e) {
+                log.errorf(e, "[SnapshotStreamWorker] BSON parsing failed for message %s. Poison pill detected. Discarding.", msg.id());
                 return Uni.createFrom().item(msg.id());
             }
         });
     }
 
-    private Uni<Void> handleComponentSnapshot(final String granularity, final String source, final long timestamp, final TakeComponentSnapshotRequest request) {
-        String uuid = request.getPlayerId();
-        byte[] data = request.getRawData().toByteArray();
-        String targetComponent = request.getTargetComponent();
+    private Uni<Void> handleComponentSnapshot(final String granularity, final String source, final long timestamp, final RawBsonDocument request) {
+        String uuid = request.getString("uuid").getValue();
+        String targetComponent = request.getString("target_component").getValue();
+        String triggerType = request.containsKey("trigger_type") ? request.getString("trigger_type").getValue() : "UNKNOWN";
+        String reason = request.containsKey("reason") ? request.getString("reason").getValue() : "N/A";
+
+        Document componentsDoc = new Document();
+        if (request.containsKey("data")) {
+            BsonValue dataVal = request.get("data");
+            if (dataVal.isDocument()) {
+                componentsDoc.append(targetComponent, Document.parse(dataVal.asDocument().toJson()));
+            } else {
+                componentsDoc.append(targetComponent, dataVal.toString());
+            }
+        }
 
         Document doc = new Document()
                 .append("source", source)
                 .append("granularity", granularity)
                 .append("timestamp", timestamp)
                 .append("uuid", uuid)
-                .append("trigger_type", request.getTriggerType())
-                .append("reason", request.getReason())
+                .append("trigger_type", triggerType)
+                .append("reason", reason)
                 .append("target_component", targetComponent)
-                .append("data", new Binary(data))
+                .append("components", componentsDoc)
                 .append("locked", false);
 
         return snapshotsCollection.insertOne(doc)
-                .invoke(() -> log.infof("[SnapshotStreamWorker] Snapshot inserted for %s (SPECIFIC, size: %d bytes).", uuid, data.length))
+                .invoke(() -> log.infof("[SnapshotStreamWorker] Snapshot inserted for %s (SPECIFIC_COMPONENT: %s).", uuid, targetComponent))
                 .replaceWithVoid();
     }
 
-    private Uni<Void> handleDatabaseSnapshot(final String granularity, final String source, final long timestamp, final TakeDatabaseSnapshotRequest request) {
-        String uuid = request.getPlayerId();
+    private Uni<Void> handleDatabaseSnapshot(final String granularity, final String source, final long timestamp, final RawBsonDocument request) {
+        String uuid = request.getString("uuid").getValue();
+        String triggerType = request.containsKey("trigger_type") ? request.getString("trigger_type").getValue() : "UNKNOWN";
+        String reason = request.containsKey("reason") ? request.getString("reason").getValue() : "N/A";
 
         return playersCollection.find(Filters.eq("uuid", uuid)).collect().first()
                 .chain(playerDoc -> {
@@ -201,27 +208,23 @@ public class SnapshotStreamWorker {
                         return Uni.createFrom().failure(new DeferredSnapshotException(uuid));
                     }
 
-                    return Uni.createFrom()
-                            .item(() -> {
-                                byte[] rawData = playerDoc.toJson().getBytes(StandardCharsets.UTF_8);
-                                return Zstd.compress(rawData);
-                            })
-                            .runSubscriptionOn(Infrastructure.getDefaultWorkerPool())
-                            .chain(compressedData -> {
-                                Document doc = new Document()
-                                        .append("source", source)
-                                        .append("granularity", granularity)
-                                        .append("timestamp", timestamp)
-                                        .append("uuid", uuid)
-                                        .append("trigger_type", request.getTriggerType())
-                                        .append("reason", request.getReason())
-                                        .append("data", new Binary(compressedData))
-                                        .append("locked", false);
+                    Document componentsDoc = playerDoc.containsKey("components") 
+                            ? playerDoc.get("components", Document.class) 
+                            : new Document();
 
-                                return snapshotsCollection.insertOne(doc)
-                                        .invoke(() -> log.infof("[SnapshotStreamWorker] Snapshot inserted for %s (FULL, size: %d bytes).", uuid, compressedData.length))
-                                        .replaceWithVoid();
-                            });
+                    Document doc = new Document()
+                            .append("source", source)
+                            .append("granularity", granularity)
+                            .append("timestamp", timestamp)
+                            .append("uuid", uuid)
+                            .append("trigger_type", triggerType)
+                            .append("reason", reason)
+                            .append("components", componentsDoc)
+                            .append("locked", false);
+
+                    return snapshotsCollection.insertOne(doc)
+                            .invoke(() -> log.infof("[SnapshotStreamWorker] Native BSON Snapshot inserted for %s (FULL).", uuid))
+                            .replaceWithVoid();
                 });
     }
 
@@ -261,7 +264,6 @@ public class SnapshotStreamWorker {
                 .replaceWith(msg.id());
     }
 
-    /** Marks the "player document does not exist yet" case — an expected, non-poison state. */
     private static final class DeferredSnapshotException extends RuntimeException {
         DeferredSnapshotException(String uuid) {
             super("Player data not found yet for " + uuid);
