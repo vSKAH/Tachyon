@@ -175,7 +175,7 @@ public class SnapshotStreamWorker {
         if (request.containsKey("data")) {
             BsonValue dataVal = request.get("data");
             if (dataVal.isDocument()) {
-                componentsDoc.append(targetComponent, Document.parse(dataVal.asDocument().toJson()));
+                componentsDoc.append(targetComponent, dataVal.asDocument().toBsonDocument());
             } else {
                 componentsDoc.append(targetComponent, dataVal.toString());
             }
@@ -223,7 +223,7 @@ public class SnapshotStreamWorker {
                             .append("locked", false);
 
                     return snapshotsCollection.insertOne(doc)
-                            .invoke(() -> log.infof("[SnapshotStreamWorker] Native BSON Snapshot inserted for %s (FULL).", uuid))
+                            .invoke(() -> log.infof("[SnapshotStreamWorker] Snapshot inserted for %s (FULL).", uuid))
                             .replaceWithVoid();
                 });
     }

@@ -323,7 +323,7 @@ public class SnapshotGrpcService implements BindableService {
                     if (doc.containsKey("components")) {
                         Document componentsDoc = doc.get("components", Document.class);
                         if (componentsDoc != null) {
-                            response.append("components", BsonDocument.parse(componentsDoc.toJson()));
+                            response.append("components", componentsDoc.toBsonDocument());
                         } else {
                             response.append("components", new BsonDocument());
                         }

@@ -31,7 +31,7 @@ public interface ComponentRegistry {
      * @param codec           The codec instance to register
      * @param <R>             The specific record component type.
      */
-    <R extends Record> void registerComponent(@NotNull ComponentCodec<R> codec);
+    <R extends Record> void registerCodec(@NotNull ComponentCodec<R> codec);
 
     /**
      * Registers a new visual preview handler for a specific component.

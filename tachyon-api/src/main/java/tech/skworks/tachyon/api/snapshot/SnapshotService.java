@@ -1,6 +1,7 @@
 package tech.skworks.tachyon.api.snapshot;
 
 import org.jetbrains.annotations.NotNull;
+import tech.skworks.tachyon.api.component.ComponentNamespace;
 
 import java.util.List;
 import java.util.Map;
@@ -99,6 +100,6 @@ public interface SnapshotService {
      * @param snapshotId The unique MongoDB ObjectId string of the snapshot to retrieve.
      * @return A CompletableFuture containing the decoded snapshot data payload.
      */
-    <T extends Record> CompletableFuture<Map<String, T>> decodeSnapshot(@NotNull final String snapshotId);
+    <T extends Record> CompletableFuture<Map<ComponentNamespace, T>> decodeSnapshot(@NotNull final String snapshotId);
 
 }

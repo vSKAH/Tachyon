@@ -10,9 +10,8 @@ import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.component.ComponentCodec;
 import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
-import tech.skworks.tachyon.api.services.SnapshotService;
-import tech.skworks.tachyon.service.contracts.snapshot.SnapshotTriggerType;
-import tech.skworks.tachyon.libs.com.google.protobuf.Message;
+import tech.skworks.tachyon.api.snapshot.SnapshotService;
+import tech.skworks.tachyon.api.snapshot.SnapshotTriggerType;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.spigot.ui.SnapshotUIManager;
 
@@ -58,6 +57,7 @@ public class SnapshotCommand implements TabExecutor {
         final TachyonProfile profile = tachyonCore.getTachyonProfileRegistry().getProfile(uuid);
         if (profile == null) return null;
         ComponentCodec<?> codec = tachyonCore.getComponentRegistry().getCodec(ComponentNamespace.parse(componentName));
+        if (codec == null) return null;
         return (T) profile.getComponent(codec.getComponentClass());
     }
 
@@ -151,7 +151,7 @@ public class SnapshotCommand implements TabExecutor {
     private void takeFullSnapshot(CommandSender sender, String targetName, String targetUniqueId, String reason) {
         sender.sendMessage("§7Initiating full snapshot for " + targetName + "...");
 
-        snapshotService.takeDatabaseSnapshot(targetUniqueId, reason, SnapshotTriggerType.SNAPSHOT_TRIGGER_MANUAL)
+        snapshotService.takeDatabaseSnapshot(targetUniqueId, reason, SnapshotTriggerType.MANUAL)
                 .whenComplete((v, ex) -> {
                     if (ex != null) {
                         sender.sendMessage("§cFailed to take full snapshot for " + targetName + ".");
@@ -174,7 +174,7 @@ public class SnapshotCommand implements TabExecutor {
 
         sender.sendMessage("§7Initiating component snapshot (" + componentName + ") for " + targetName + "...");
 
-        snapshotService.takeComponentSnapshot(targetUniqueId.toString(), reason, SnapshotTriggerType.SNAPSHOT_TRIGGER_MANUAL, component).whenComplete((v, ex) -> {
+        snapshotService.takeComponentSnapshot(targetUniqueId.toString(), reason, SnapshotTriggerType.MANUAL, component).whenComplete((v, ex) -> {
             if (ex != null) {
                 sender.sendMessage("§cFailed to take specific snapshot for " + targetName + ".");
                 return;

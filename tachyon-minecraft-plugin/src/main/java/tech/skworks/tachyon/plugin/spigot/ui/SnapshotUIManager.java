@@ -1,6 +1,7 @@
 package tech.skworks.tachyon.plugin.spigot.ui;
 
 import dev.triumphteam.gui.builder.item.ItemBuilder;
+import dev.triumphteam.gui.guis.BaseGui;
 import dev.triumphteam.gui.guis.Gui;
 import dev.triumphteam.gui.guis.GuiItem;
 import dev.triumphteam.gui.guis.PaginatedGui;
@@ -11,9 +12,12 @@ import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.ClickType;
-import tech.skworks.tachyon.api.services.SnapshotService;
-import tech.skworks.tachyon.service.contracts.snapshot.SnapshotInfo;
-import tech.skworks.tachyon.libs.com.google.protobuf.Any;
+import org.bukkit.inventory.ItemStack;
+import tech.skworks.tachyon.api.component.ComponentNamespace;
+import tech.skworks.tachyon.api.component.ComponentPreviewHandler;
+import tech.skworks.tachyon.api.component.ComponentRegistry;
+import tech.skworks.tachyon.api.snapshot.SnapshotInfo;
+import tech.skworks.tachyon.api.snapshot.SnapshotService;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 
 import java.time.Instant;
@@ -47,9 +51,9 @@ public class SnapshotUIManager {
                 return;
             }
 
-            Map<LocalDate, List<SnapshotInfo>> groupedSnapshots = snapshotListResponse.getSnapshotsList().stream().collect(
+            Map<LocalDate, List<SnapshotInfo>> groupedSnapshots = snapshotListResponse.stream().collect(
                     Collectors.groupingBy(
-                            snap -> Instant.ofEpochMilli(snap.getTimestamp()).atZone(ZoneId.systemDefault()).toLocalDate(),
+                            snap -> Instant.ofEpochMilli(snap.timestamp()).atZone(ZoneId.systemDefault()).toLocalDate(),
                             () -> new TreeMap<LocalDate, List<SnapshotInfo>>(Comparator.reverseOrder()),
                             Collectors.toList()
                     )
@@ -69,7 +73,7 @@ public class SnapshotUIManager {
                             .lore(Component.text("§7Contains §e" + daySnapshots.size() + " §7save(s)"),
                                     Component.empty(),
                                     Component.text("§a▶ Click to open this day"))
-                            .asGuiItem(event -> {
+                            .asGuiItem(_ -> {
                                 player.closeInventory();
                                 openSnapshotFoldersGui(plugin, player, target, daySnapshots);
                             });
@@ -90,21 +94,21 @@ public class SnapshotUIManager {
         PaginatedGui gui = Gui.paginated().title(Component.text("§8History of §e" + targetName)).rows(6).pageSize(45).disableAllInteractions().create();
 
         for (SnapshotInfo daySnapshot : daySnapshots) {
-            String instant = Instant.ofEpochMilli(daySnapshot.getTimestamp()).atZone(ZoneId.systemDefault()).format(TIME_FORMATTER); // Assure-toi que TIME_FORMATTER est défini
+            String instant = Instant.ofEpochMilli(daySnapshot.timestamp()).atZone(ZoneId.systemDefault()).format(TIME_FORMATTER);
 
-            boolean isLocked = daySnapshot.getLocked();
+            boolean isLocked = daySnapshot.locked();
             Material icon = isLocked ? Material.ENCHANTED_BOOK : Material.BOOK;
             String lockLore = isLocked ? "§c🔒 Locked (Protected)" : "§a🔓 Unlocked (Auto-purgeable)";
 
             GuiItem folderItem = ItemBuilder.from(icon).name(Component.text("§6" + instant))
                     .lore(
-                            Component.text("§7Snapshot Id: §e" + daySnapshot.getSnapshotId()),
+                            Component.text("§7Snapshot Id: §e" + daySnapshot.snapshotId()),
                             Component.empty(),
-                            Component.text("§7Granularity: §e" + StringUtils.capitalize(daySnapshot.getGranularity().toLowerCase())),
-                            Component.text("§7Trigger Type: §e" + StringUtils.capitalize(daySnapshot.getTriggerType().name().toLowerCase())),
-                            Component.text("§7Source: §e" + StringUtils.capitalize(daySnapshot.getSource().toLowerCase())),
+                            Component.text("§7Granularity: §e" + StringUtils.capitalize(daySnapshot.granularity().toLowerCase())),
+                            Component.text("§7Trigger Type: §e" + StringUtils.capitalize(daySnapshot.triggerType().name().toLowerCase())),
+                            Component.text("§7Source: §e" + StringUtils.capitalize(daySnapshot.source().toLowerCase())),
                             Component.empty(),
-                            Component.text("§7Reason: §e" + StringUtils.capitalize(daySnapshot.getReason())),
+                            Component.text("§7Reason: §e" + StringUtils.capitalize(daySnapshot.reason())),
                             Component.empty(),
                             Component.text(lockLore),
                             Component.empty(),
@@ -115,15 +119,15 @@ public class SnapshotUIManager {
                         if (click == ClickType.MIDDLE) {
                             player.sendMessage("§7Updating the locking state...");
 
-                            plugin.getSnapshotService().toggleSnapshotLocking(daySnapshot.getSnapshotId(), player.getUniqueId().toString())
-                                    .whenComplete((response, error) -> {
+                            plugin.getSnapshotService().toggleSnapshotLocking(daySnapshot.snapshotId(), player.getUniqueId().toString())
+                                    .whenComplete((lockedResponse, error) -> {
                                         Bukkit.getScheduler().runTask(plugin, () -> {
                                             if (error != null) {
                                                 player.sendMessage(error.getMessage());
                                                 return;
                                             }
 
-                                            if (response.getLockStatus()) {
+                                            if (lockedResponse) {
                                                 player.sendMessage("§aSuccess, the snapshot has locked!");
                                             } else {
                                                 player.sendMessage("§eSuccess, the snapshot has unlocked !");
@@ -135,7 +139,7 @@ public class SnapshotUIManager {
                             return;
                         }
                         player.closeInventory();
-                        openSnapshotPreview(plugin, player, daySnapshot.getSnapshotId(), daySnapshot.getGranularity(), () -> openSnapshotFoldersGui(plugin, player, target, daySnapshots));
+                        openSnapshotPreview(plugin, player, daySnapshot.snapshotId(), daySnapshot.granularity(), () -> openSnapshotFoldersGui(plugin, player, target, daySnapshots));
                     });
 
             gui.addItem(folderItem);
@@ -153,20 +157,23 @@ public class SnapshotUIManager {
         player.sendMessage("§7Downloading snapshot data from backend...");
 
         plugin.getSnapshotService().decodeSnapshot(snapshotId).whenComplete((response, error) -> {
+
             if (error != null) {
                 player.sendMessage("§cUnable to fetch the snapshot data.");
                 return;
             }
 
+
             Bukkit.getScheduler().runTask(plugin, () -> {
+
                 if (granularity.equalsIgnoreCase("FULL")) {
-                //    openFullSnapshotSubMenu(plugin, player, response.getComponentsMap(), onBack);
+                    openFullSnapshotSubMenu(plugin, player, response, onBack);
                     return;
                 }
 
-                if (response.getComponentsCount() > 0) {
-                //    Map.Entry<String, Any> entry = response.getComponentsMap().entrySet().iterator().next();
-                 //   openComponentGui(plugin, player, entry.getKey(), entry.getValue(), onBack);
+                if (!response.isEmpty()) {
+                   Map.Entry<ComponentNamespace, Record> entry = response.entrySet().iterator().next();
+                   openComponentGui(plugin, player, entry.getKey(), entry.getValue(), onBack);
                 } else {
                     player.sendMessage("§cThis snapshot contains no data.");
                     onBack.run();
@@ -175,27 +182,24 @@ public class SnapshotUIManager {
         });
     }
 
-    /*private static void openFullSnapshotSubMenu(TachyonCore plugin, Player player, Map<String, Any> componentsMap, Runnable onBack) {
-        ComponentRegistry<ItemStack> registry = plugin.getComponentRegistry();
+    private static <R extends Record> void openFullSnapshotSubMenu(TachyonCore plugin, Player player, Map<ComponentNamespace, R> componentsMap, Runnable onBack) {
+        ComponentRegistry registry = plugin.getComponentRegistry();
 
         PaginatedGui gui = Gui.paginated().title(Component.text("§8Select Component to Preview")).rows(6).pageSize(45).disableAllInteractions().create();
 
-        for (Map.Entry<String, Any> entry : componentsMap.entrySet()) {
-            final String componentFullName = entry.getKey();
-            final Any componentData = entry.getValue();
+        for (Map.Entry<ComponentNamespace, R> entry : componentsMap.entrySet()) {
+            final var componentNamespace = entry.getKey();
+            final var componentData = entry.getValue();
 
-            String shortName = registry.getComponentShortName(componentFullName);
-            if (shortName == null) shortName = "Unknown";
-
-            final ComponentPreviewHandler<ItemStack> handler = registry.getPreviewHandler(componentFullName);
+            final ComponentPreviewHandler<ItemStack, R> handler = registry.getPreviewHandler((Class<R>) componentData.getClass());
             final ItemStack itemStack = handler == null ? new ItemStack(Material.BARRIER) : handler.buildComponentIcon();
 
             GuiItem componentIcon = ItemBuilder.from(itemStack)
-                    .name(Component.text("§6" + shortName))
+                    .name(Component.text("§6" + componentNamespace))
                     .lore(Component.text("§7Click to view this component"))
                     .asGuiItem(_ -> {
                         player.closeInventory();
-                        openComponentGui(plugin, player, componentFullName, componentData, () -> openFullSnapshotSubMenu(plugin, player, componentsMap, onBack));
+                        openComponentGui(plugin, player, componentNamespace, componentData, () -> openFullSnapshotSubMenu(plugin, player, componentsMap, onBack));
                     });
             gui.addItem(componentIcon);
         }
@@ -207,24 +211,22 @@ public class SnapshotUIManager {
         gui.open(player);
     }
 
-    private static void openComponentGui(TachyonCore plugin, Player player, String componentFullName, Any componentData, Runnable onBack) {
+    private static <T extends Record> void openComponentGui(TachyonCore plugin, Player player, ComponentNamespace componentNamespace, T component, Runnable onBack) {
         ComponentRegistry registry = plugin.getComponentRegistry();
-        final Message message = registry.unpack(componentData);
 
-        if (message == null) {
-            player.sendMessage("§cFailed to unpack data for " + componentFullName);
+        if (component == null) {
+            player.sendMessage("§cComponent data is null");
             return;
         }
 
-        ComponentPreviewHandler<ItemStack> handler = registry.getPreviewHandler(componentFullName);
+        final ComponentPreviewHandler<ItemStack, T> handler = registry.getPreviewHandler((Class<T>) component.getClass());
         if (handler == null) {
-            player.sendMessage("§cNo preview handler registered for: " + componentFullName);
+            player.sendMessage("§cNo preview handler registered for: " + componentNamespace);
             return;
         }
 
-        ItemStack[] previewItems = handler.buildComponentDataDisplay(message);
-        String shortName = registry.getComponentShortName(componentFullName);
-        String guiTitle = "Preview: " + (shortName != null ? shortName : "Component");
+        final ItemStack[] previewItems = handler.buildComponentDataDisplay(component);
+        final var guiTitle = "Preview: " + componentNamespace;
 
         BaseGui baseGui;
         if (previewItems.length > 45) {
@@ -252,6 +254,4 @@ public class SnapshotUIManager {
         baseGui.setItem(6, 5, ItemBuilder.from(Material.PAPER).name(Component.text("§cGo Back")).asGuiItem(_ -> onBack.run()));
         baseGui.open(player);
     }
-
-     */
 }

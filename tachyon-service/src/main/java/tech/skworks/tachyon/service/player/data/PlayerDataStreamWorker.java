@@ -184,28 +184,6 @@ class PlayerDataStreamWorker {
         return updateOperations;
     }
 
-    private void takeSnapshotIfAllowed(String uuid, String reason) {
-        String throttleKey = "snapshot:throttle:" + uuid;
-        //  boolean allowed = redisString.setAndChanged(throttleKey, "1", new SetArgs().nx().ex(snapshotThrottleSeconds));
-
-        // if (!allowed) {
-        //     log.debugf("[PlayerStreamWorker] Snapshot throttled for %s (within %ds window, reason: %s).", uuid, snapshotThrottleSeconds, reason);
-        //    return;
-        //  }
-
-        Document existing = playersCollection.find(Filters.eq("uuid", uuid)).first();
-        if (existing != null) {
-            Document toSnapshot = new Document(existing);
-            toSnapshot.remove("_id");
-
-            byte[] data = toSnapshot.toJson().getBytes(StandardCharsets.UTF_8);
-            //   snapshotsCollection.insertOne(new Document("uuid", uuid).append("timestamp", System.currentTimeMillis()).append("reason", reason).append("data", new Binary(data)));
-            log.infof("[PlayerStreamWorker] Snapshot created for %s (reason: %s, size: %d bytes).", uuid, reason, data.length);
-        } else {
-            log.debugf("[PlayerStreamWorker] No existing document to snapshot for %s.", uuid);
-        }
-    }
-
     private void updateCacheBatchAndUnlock(List<String> uuids) {
         Set<String> uniqueUuids = new HashSet<>(uuids);
         try {

@@ -1,12 +1,8 @@
 package tech.skworks.tachyon.exampleplugin;
 
-import org.bukkit.Material;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import tech.skworks.tachyon.api.TachyonAPI;
-import tech.skworks.tachyon.api.component.ComponentPreviewHandler;
 import tech.skworks.tachyon.exampleplugin.component.CookieComponent;
 
 /**
@@ -29,27 +25,12 @@ public class TachyonCookies extends JavaPlugin {
             return;
         }
 
-        tachyon.getComponentRegistry().registerComponent(new CookieComponent.CookieComponentCodec());
 
-        tachyon.getComponentRegistry().registerPreviewHandler(CookieComponent.class, new ComponentPreviewHandler<>() {
+        var cookieCodec = new CookieComponent.CookieComponentCodec();
 
-            //Used inside gui /snapshot list to differentiate components inside a full snapshot
-            @Override
-            public ItemStack buildComponentIcon() {
-                return new ItemStack(Material.COOKIE);
-            }
+        tachyon.getComponentRegistry().registerCodec(cookieCodec);
+        tachyon.getComponentRegistry().registerPreviewHandler(CookieComponent.class, cookieCodec);
 
-            @Override
-            public Object[] buildComponentDataDisplay(CookieComponent record) {
-                //You can use an ItemBuilder for better readability.
-                ItemStack itemStack = new ItemStack(Material.COOKIE);
-                ItemMeta meta = itemStack.getItemMeta();
-                meta.setDisplayName(" Amount of Cookie: " + record.cookiesAmount());
-                itemStack.setItemMeta(meta);
-
-                return new ItemStack[]{itemStack};
-            }
-        });
         getCommand("cookie").setExecutor(new CookieCommand(this));
         getLogger().info("Cookie Clicker loaded !");
     }

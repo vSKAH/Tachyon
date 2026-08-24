@@ -3,17 +3,18 @@ package tech.skworks.tachyon.plugin.spigot;
 import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.command.TabExecutor;
-import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.TachyonAPI;
 import tech.skworks.tachyon.api.event.EventBus;
+import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
 import tech.skworks.tachyon.api.services.*;
+import tech.skworks.tachyon.api.snapshot.SnapshotService;
 import tech.skworks.tachyon.plugin.core.audit.GrpcAuditService;
 import tech.skworks.tachyon.plugin.core.event.TachyonEventBusImpl;
 import tech.skworks.tachyon.plugin.core.system.GrpcSystemService;
@@ -106,7 +107,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         this.grpcAuditService = new GrpcAuditService(metricsService.getTachyonMetrics(), backendStubProvider, config);
         this.grpcPlayerDataService = new GrpcPlayerDataService(backendStubProvider, getDataFolder(), metricsService.getTachyonMetrics());
         this.grpcPlayerSessionService = new GrpcPlayerSessionService(metricsService.getTachyonMetrics(), backendStubProvider, this);
-        this.grpcSnapshotService = new GrpcSnapshotService(metricsService.getTachyonMetrics(), backendStubProvider);
+        this.grpcSnapshotService = new GrpcSnapshotService(metricsService.getTachyonMetrics(), backendStubProvider, componentRegistryImpl);
 
         this.logger.info("Grpc Services has been initialized.");
 

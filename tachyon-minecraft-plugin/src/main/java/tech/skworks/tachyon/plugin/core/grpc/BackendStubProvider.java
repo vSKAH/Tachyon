@@ -2,7 +2,6 @@ package tech.skworks.tachyon.plugin.core.grpc;
 
 import tech.skworks.tachyon.service.contracts.audit.AuditServiceGrpc;
 import tech.skworks.tachyon.service.contracts.player.session.PlayerSessionServiceGrpc;
-import tech.skworks.tachyon.service.contracts.snapshot.SnapshotServiceGrpc;
 import tech.skworks.tachyon.service.contracts.system.SystemGrpc;
 import tech.skworks.tachyon.libs.io.grpc.ManagedChannel;
 import tech.skworks.tachyon.libs.io.grpc.ManagedChannelBuilder;
@@ -30,7 +29,6 @@ public class BackendStubProvider {
     private final ManagedChannel channel;
     private final PlayerSessionServiceGrpc.PlayerSessionServiceBlockingStub playerSessionStub;
     private final AuditServiceGrpc.AuditServiceBlockingStub auditStub;
-    private final SnapshotServiceGrpc.SnapshotServiceBlockingStub snapshotStub;
     private final SystemGrpc.SystemBlockingStub systemStub;
 
     public BackendStubProvider(String host, int port) {
@@ -39,7 +37,6 @@ public class BackendStubProvider {
         this.channel = ManagedChannelBuilder.forAddress(host, port).useTransportSecurity().executor(grpcVirtualExecutor).keepAliveTime(30, TimeUnit.SECONDS).keepAliveTimeout(5, TimeUnit.SECONDS).keepAliveWithoutCalls(true).maxInboundMessageSize(32 * 1024 * 1024).enableRetry().maxRetryAttempts(3).defaultLoadBalancingPolicy("round_robin").build();
         this.playerSessionStub = PlayerSessionServiceGrpc.newBlockingStub(channel);
         this.auditStub = AuditServiceGrpc.newBlockingStub(channel);
-        this.snapshotStub = SnapshotServiceGrpc.newBlockingStub(channel);
         this.systemStub = SystemGrpc.newBlockingStub(channel);
     }
 
@@ -49,10 +46,6 @@ public class BackendStubProvider {
 
     public AuditServiceGrpc.AuditServiceBlockingStub getAuditStub(int deadline) {
         return auditStub.withDeadlineAfter(deadline, TimeUnit.SECONDS);
-    }
-
-    public SnapshotServiceGrpc.SnapshotServiceBlockingStub getSnapshotStub(int deadline) {
-        return snapshotStub.withDeadlineAfter(deadline, TimeUnit.SECONDS);
     }
 
     public SystemGrpc.SystemBlockingStub getSystemStub(int deadline) {

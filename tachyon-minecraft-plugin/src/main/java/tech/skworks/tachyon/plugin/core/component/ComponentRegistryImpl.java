@@ -29,7 +29,7 @@ public class ComponentRegistryImpl implements ComponentRegistry {
     private final Map<Class<? extends Record>, ComponentPreviewHandler<?, ? extends Record>> previewHandlers = new ConcurrentHashMap<>();
 
     @Override
-    public <R extends Record> void registerComponent(@NotNull ComponentCodec<R> codec) {
+    public <R extends Record> void registerCodec(@NotNull ComponentCodec<R> codec) {
         Objects.requireNonNull(codec, "Codec cannot be null");
 
         codecsByNamespace.put(codec.getComponentNamespace(), codec);
