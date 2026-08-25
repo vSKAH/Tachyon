@@ -14,7 +14,6 @@
         <module>tachyon-service</module>
         <module>tachyon-minecraft-plugin</module>
         <module>tachyon-minecraft-example</module>
-        <module>tachyon-minecraft-benchmark</module>
     </modules>
 
     <properties>
