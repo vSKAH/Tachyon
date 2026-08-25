@@ -2,88 +2,78 @@
 
 # 🌌 Tachyon
 
-**Advanced, High-Performance Player Data Management for Modern Minecraft Networks**
+**High-Performance, Reactive Distributed Player Data Management for Modern Minecraft Networks**
 
 [![Java](https://img.shields.io/badge/Java-25-red.svg?style=flat-square&logo=openjdk)](https://openjdk.org/)
 [![PaperSpigot](https://img.shields.io/badge/Paper-1.8.8+-yellow.svg?style=flat-square)](https://papermc.io/)
-[![MongoDB](https://img.shields.io/badge/MongoDB-Reactive-47A248.svg?style=flat-square&logo=mongodb)](https://www.mongodb.com/)
-[![gRPC](https://img.shields.io/badge/gRPC-Microservice-244c5a.svg?style=flat-square)](https://grpc.io/)
+[![Quarkus](https://img.shields.io/badge/Quarkus-3.x_Reactive-4695EB.svg?style=flat-square&logo=quarkus)](https://quarkus.io/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Reactive_&_TimeSeries-47A248.svg?style=flat-square&logo=mongodb)](https://www.mongodb.com/)
+[![Redis](https://img.shields.io/badge/Redis-Streams_&_Cache-DC382D.svg?style=flat-square&logo=redis)](https://redis.io/)
+[![gRPC](https://img.shields.io/badge/gRPC-Pure_BSON-244c5a.svg?style=flat-square)](https://grpc.io/)
+[![Micrometer](https://img.shields.io/badge/Micrometer-Prometheus-blue.svg?style=flat-square)](https://micrometer.io/)
 [![License](https://img.shields.io/badge/License-GPL_3.0-green.svg?style=flat-square)](LICENSE)
 
 </div>
 
 <br>
 
-Tachyon abstracts away the complexities of dealing with distributed player data across multiple servers. By leveraging a microservice architecture with **gRPC, Protocol Buffers (Protobuf), Redis, MongoDB, and AWS S3-compatible storage**, Tachyon guarantees zero-data-loss synchronization.
+**Tachyon** abstracts away the complexities of dealing with distributed player data across multi-server Minecraft networks. Built from the ground up with **Java 25, gRPC (Pure BSON zero-copy), Redis Streams, MongoDB Reactive & TimeSeries, and AWS S3-compatible cold storage**, Tachyon guarantees blazing-fast, race-condition-free synchronization with zero data loss.
 
-Instead of writing repetitive SQL queries or dealing with race conditions when a player switches servers, Tachyon handles synchronization, caching, snapshots, and auditing automatically behind the scenes.
+Instead of writing repetitive SQL queries or battling dupe glitches when players rapidly hop between servers, Tachyon handles distributed locking, state transfers, streaming persistence, granular rollbacks, and audit logging seamlessly.
 
-> 📊 **Built for Production:** Enjoy real-time monitoring of gRPC latency, profile caching, and network health directly through our native Prometheus/Grafana integration.
+> 📊 **Turnkey Observability:** Full real-time visibility into gRPC latency (P50/P95/P99), lock contention retries, JVM memory pools, thread states, and server TPS/MSPT directly in our pre-configured [Grafana Dashboard](grafana/minecraft-monitoring.json).
 
 ---
 
-## ⚖️ Why Tachyon? (Vanilla vs. Tachyon)
+## ⚖️ Why Tachyon? (Legacy SQL/JSON vs. Tachyon 2.0)
 
-When building a Minecraft network, managing player data (economy, stats, inventory) is often the hardest part. Here is why you should upgrade to Tachyon:
-
-| Feature | Vanilla Approach (MySQL/Mongo) | 🌌 Tachyon Ecosystem |
-|---------|-----------------|---------|
-| **Data Schema** | Manual SQL tables or raw JSON objects. Hard to refactor. | **Type-Safe** Protobuf schemas. Easy to evolve without breaking old data. |
-| **Server Sync** | Manual Redis pub/sub or database polling. Prone to race conditions (dupe glitches). | **Automated** gRPC streams. Handles lock acquisition and state transfers seamlessly. |
-| **Backups** | Full daily database dumps. Restoring one player's data is a nightmare. | **Granular Snapshots**. Rollback a single player's specific component to an exact point in time. |
-| **Extensibility** | Every plugin manages its own database connection and tables. | **Centralized Component Registry**. Plugins just register their Protobuf message and Tachyon handles the rest. |
-| **Auditing** | Writing custom text files or bloated SQL logs. | Built-in, structured **Audit gRPC Service**. |
+| Feature | Legacy Approach (MySQL/Mongo Sync) | 🌌 Tachyon 2.0 Ecosystem |
+| :--- | :--- | :--- |
+| **Data Format** | Heavy JSON blobs or rigid SQL tables. Schema refactoring is painful. | **Pure BSON & Java Records**. Zero-copy binary serialization with type-safe codecs. |
+| **Server Sync & Locks** | Manual pub/sub or polling. Prone to race conditions and inventory duplication. | **Automated Distributed Leases & Heartbeats**. Cross-server atomic state control with lock telemetry. |
+| **Persistence I/O** | Synchronous DB queries blocking the server thread on join/quit. | **Asynchronous Redis Streams Buffer**. Writes are enqueued in microseconds and flushed non-blockingly to MongoDB. |
+| **Backups & Rollbacks** | Massive full-database dumps. Restoring one player's lost item is tedious. | **Granular Point-in-Time Snapshots**. Roll back a single component or entire profile with a GUI. |
+| **Cold Storage** | Databases bloat over time with inactive snapshots. | **Automated S3 Janitor**. Compresses and archives historical snapshots to S3-compatible object storage. |
+| **Resilience & Failover** | Network hiccup = lost player progress. | **Local Dead-Letter Recovery Queue**. Automatically persists pending saves to disk and retries upon reconnection. |
+| **Observability** | Custom log parsers or basic TPS commands. | **Native Micrometer Engine**. Deep Grafana dashboards tracking gRPC percentiles, JVM internals, and Spark TPS/MSPT. |
 
 ---
 
 ## ✨ Core Features
 
-* **📦 Component-Based Data System**: Define your player data schemas using Protobuf.
-  <details><summary><i>👀 Click to see MongoDB Schema (Protobuf & Cookies)</i></summary>
-  <img src=".github/images/MongoDB-Players.png" alt="MongoDB Players Collection">
-  </details>
-
-* **⚡ Real-time Server Sync**: Powered by gRPC streams, player data is synchronized instantly across your entire network. When a player switches servers, their data is ready before they even connect.
-
-* **⏪ Snapshots & Backups**: Every data change can be versioned. Securely store and review point-in-time player data.
-  <details><summary><i>👀 Click to see MongoDB Snapshots (Binary Data)</i></summary>
-  <img src=".github/images/MongoDB-Snapshots.png" alt="MongoDB Snapshots Collection">
-  </details>
-
-* **🧹 S3 Janitor**: Purges old or redundant snapshots and moves them to your S3 storage to save database space, reduce costs, and optimize resources.
-
-* **🕵️ Audit Logs**: A built-in system to track critical player actions for easy moderation and analytics.
-  <details><summary><i>👀 Click to see MongoDB Audit Logs</i></summary>
-  <img src=".github/images/MongoDB-AuditLogs.png" alt="MongoDB Audit Logs">
-  </details>
-
-* **🛡️ Retry Queue & Resiliency**: Network failure? Database timeout? Tachyon queues pending operations and retries them automatically when the connection is restored.
+* **📦 Pure BSON Component Engine**: Define your player data schemas using standard Java 25 records and `ComponentCodec<T>` with zero boilerplate.
+* **⚡ 100% Non-Blocking Reactive Pipeline**: Built on Quarkus, SmallRye Mutiny, and Netty. The backend never blocks threads, handling tens of thousands of requests per second with minimal RAM.
+* **🔒 Distributed State & Lock Protection**: Prevents multi-server login dupes with distributed lease tokens, non-blocking heartbeats, and lock contention telemetry.
+* **⏪ Granular Snapshots & S3 Archival**: Point-in-time player backups with GUI inspection. Older snapshots are automatically moved to S3 cold storage.
+* **🕵️ TimeSeries Auditing**: Track critical player transactions, balance updates, and administrative actions in MongoDB TimeSeries collections with automatic TTL expiration.
+* **🛡️ Local Recovery Queue**: If the backend goes down or network connectivity drops, the Spigot plugin writes pending saves to a local binary recovery store and flushes them when the connection is restored.
+* **📈 Out-of-the-Box Micrometer & Grafana Dashboard**: Exposes Prometheus metrics covering gRPC network health, profile load duration, GC pauses, memory pools, and thread states.
 
 ---
 
 ## 🏗️ Architecture Overview
 
-Tachyon relies on a strict separation of concerns, ensuring your Minecraft servers are never weighed down by heavy database computations.
-
-* `tachyon-service`: The standalone backend microservice (Quarkus/Java) handling gRPC, DB connections, and S3.
-* `tachyon-api`: The lightweight client API.
-* `tachyon-minecraft-plugin`: The Spigot/Paper implementation to connect your servers to the backend.
-
 ```mermaid
 graph LR
-    subgraph Minecraft Network
-        P1(Plugin A) --> API(Tachyon API)
-        P2(Plugin B) --> API
-        API --> Core(Tachyon Core)
+    subgraph "Minecraft Network (Spigot/Paper)"
+        P1["Plugin A"] --> API["Tachyon API"]
+        P2["Plugin B"] --> API
+        API --> Core["Tachyon Core Plugin\n(Micrometer + Local Recovery Queue)"]
     end
 
-    Core -- gRPC Streams --> Service(Tachyon Microservice)
+    Core -- "gRPC (Pure BSON Streams)" --> Service["Tachyon Backend\n(Quarkus 3.x Reactive)"]
 
-    subgraph Backend
-        Service -- Fast Cache --> Redis[(Redis)]
-        Service -- Persistence --> Mongo[(MongoDB)]
-        Service -- Archives --> S3[AWS S3]
+    subgraph "Storage & Streaming Infrastructure"
+        Service -- "Fast Cache & Locks" --> RedisCache[("Redis Cache")]
+        Service -- "Async Ingestion Buffer" --> RedisStreams[("Redis Streams")]
+        RedisStreams --> Workers["Reactive Stream Workers\n(Player, Snapshot, Audit)"]
+        Workers -- "Bulk Persistence" --> Mongo[("MongoDB Reactive\n& TimeSeries")]
+        Workers -- "Cold Archival" --> S3["AWS S3 / MinIO"]
     end
+
+    Core -- "Scrape /metrics" --> Prometheus["Prometheus"]
+    Service -- "Scrape /q/metrics" --> Prometheus
+    Prometheus --> Grafana["Grafana Dashboard"]
 ```
 
 ---
@@ -91,104 +81,158 @@ graph LR
 ## 🚀 Quick Start & Installation
 
 ### Prerequisites
-* **Java 25+** (for both the Minecraft server and the microservice)
-* **MongoDB 8.x** (Replica Set recommended for transactions)
-* **Redis 8.x** (For Streams and Snapshot Queues)
-* **Spigot / Paper 1.8.8+**
+* **Java 25+** (for both the Minecraft server and `tachyon-service`)
+* **MongoDB 8.x** (Replica Set recommended)
+* **Redis 7.x / 8.x** (for Streams, state locks, and distributed caching)
+* **Spigot / Paper 1.8.8+** (or modern Paper/Purpur)
+* **Prometheus & Grafana** (optional, for real-time monitoring)
 
 ### Deployment Steps
-1. **Start the Backend:** Deploy the `tachyon-service` alongside your MongoDB and Redis instances (Docker Compose is highly recommended).
-2. **Install the Plugin:** Drop the `tachyon-minecraft-plugin.jar` into your Minecraft server's `plugins/` folder.
-3. **Configure:** Start the server once to generate the config files, then edit `plugins/Tachyon/config.yml` to point to your gRPC backend host and port.
-4. **Restart:** You're ready to go!
+1. **Start the Backend Microservice:**
+   Deploy `tachyon-service` alongside MongoDB and Redis (Docker Compose recommended).
+   ```bash
+   # Build the Quarkus runner jar
+   mvn clean package -pl tachyon-service -DskipTests
+   java -jar tachyon-service/target/quarkus-app/quarkus-run.jar
+   ```
+2. **Install the Spigot Plugin:**
+   Copy `tachyon-minecraft-plugin.jar` into your Minecraft server's `plugins/` folder.
+3. **Configure Connection:**
+   Start the server to generate `plugins/Tachyon/config.yml` and set your gRPC host, port, and security parameters:
+   ```yaml
+   backend:
+     host: "127.0.0.1"
+     port: 9090
+     use-tls: false
+   metrics:
+     enabled: true
+     port: 9100
+   ```
+4. **Import the Grafana Dashboard:**
+   Import [`grafana/minecraft-monitoring.json`](grafana/minecraft-monitoring.json) into your Grafana instance to monitor real-time network and JVM telemetry.
 
 ---
 
 ## 🛠️ Developers: How to Use the API
 
-📚 **[Read the Official JavaDoc Here](https://vskah.github.io/Tachyon/)**
+Tachyon is designed to be developer-friendly, type-safe, and non-intrusive.
 
-Tachyon is designed to be extremely developer-friendly. You don't need to write a single SQL query or manage database connections.
+### 1. Define your Component (Java Record + BSON Codec)
 
-### 1. Define your Component (Protobuf)
-Create a `.proto` file in your plugin to define your exact data structure.
+Create an immutable record representing your data, along with a `ComponentCodec` defining its BSON serialization and UI representation:
 
-```protobuf
-syntax = "proto3";
-package tech.skworks.tachyon.exampleplugin.components;
+```java
+package tech.skworks.tachyon.exampleplugin.component;
 
-option java_multiple_files = true;
-option java_package = "tech.skworks.tachyon.exampleplugin.components";
+import lombok.Builder;
+import org.bson.BsonDocument;
+import org.bson.BsonInt64;
+import org.bukkit.Material;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import tech.skworks.tachyon.api.component.ComponentCodec;
+import tech.skworks.tachyon.api.component.ComponentNamespace;
+import tech.skworks.tachyon.api.component.ComponentPreviewHandler;
 
-message CookieComponent {
-  int64 cookies = 1;
+@Builder(toBuilder = true)
+public record CookieComponent(long cookiesAmount) {
+
+    private static final String NAMESPACE_GROUP = "TachyonCookies";
+    private static final String NAMESPACE_KEY = "cookies";
+    private static final long DEFAULT_COOKIE_AMOUNT = 0L;
+
+    public CookieComponent {
+        if (cookiesAmount < 0) {
+            throw new IllegalArgumentException("cookiesAmount cannot be negative: %d".formatted(cookiesAmount));
+        }
+    }
+
+    public static class CookieComponentCodec implements ComponentCodec<CookieComponent>, ComponentPreviewHandler<ItemStack, CookieComponent> {
+
+        private static final ComponentNamespace NAMESPACE = ComponentNamespace.of(NAMESPACE_GROUP, NAMESPACE_KEY);
+        private static final String BSON_FIELD_COOKIES = "cookies";
+
+        @Override
+        public ComponentNamespace getComponentNamespace() {
+            return NAMESPACE;
+        }
+
+        @Override
+        public Class<CookieComponent> getComponentClass() {
+            return CookieComponent.class;
+        }
+
+        @Override
+        public BsonDocument encode(CookieComponent component) {
+            return new BsonDocument(BSON_FIELD_COOKIES, new BsonInt64(component.cookiesAmount()));
+        }
+
+        @Override
+        public CookieComponent decode(BsonDocument bson) {
+            long value = bson.getNumber(BSON_FIELD_COOKIES, new BsonInt64(DEFAULT_COOKIE_AMOUNT)).longValue();
+            return new CookieComponent(value);
+        }
+
+        @Override
+        public ItemStack buildComponentIcon() {
+            return new ItemStack(Material.COOKIE);
+        }
+
+        @Override
+        public ItemStack[] buildComponentDataDisplay(CookieComponent record) {
+            ItemStack itemStack = new ItemStack(Material.COOKIE);
+            ItemMeta meta = itemStack.getItemMeta();
+            meta.setDisplayName("§6Cookies: §e" + record.cookiesAmount());
+            itemStack.setItemMeta(meta);
+            return new ItemStack[]{itemStack};
+        }
+    }
 }
 ```
 
-### 2. Register the Component in your Plugin
-Get the instance of `TachyonAPI<ItemStack>` through the Bukkit Services Manager and register your UI handler.
+### 2. Register the Codec in your Plugin
+
+Obtain `TachyonAPI` from Bukkit's Service Manager and register your codec:
 
 ```java
 public class TachyonCookies extends JavaPlugin {
 
-    // <ItemStack> defines the visual type used by the ComponentRegistry for the UI
-    private TachyonAPI<ItemStack> tachyon;
+    private TachyonAPI tachyon;
 
     @Override
     public void onEnable() {
-        if (!setupTachyon()) {
-            getLogger().severe("Tachyon API missing! Disabling...");
+        RegisteredServiceProvider<TachyonAPI> rsp = getServer().getServicesManager().getRegistration(TachyonAPI.class);
+        if (rsp == null) {
+            getLogger().severe("TachyonAPI not found! Disabling...");
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
+        this.tachyon = rsp.getProvider();
 
-        // Register your component and define how it should be displayed in the Snapshot GUI
-        tachyon.getComponentRegistry().registerComponent(CookieComponent.getDefaultInstance(), new ComponentPreviewHandler<>() {
+        var cookieCodec = new CookieComponent.CookieComponentCodec();
+        tachyon.getComponentRegistry().registerCodec(cookieCodec);
+        tachyon.getComponentRegistry().registerPreviewHandler(CookieComponent.class, cookieCodec);
 
-            @Override
-            public ItemStack buildComponentIcon() {
-                return new ItemStack(Material.COOKIE);
-            }
-
-            @Override
-            public <C extends Message> ItemStack[] buildComponentDataDisplay(C message) {
-                CookieComponent cookieComponent = (CookieComponent) message;
-                
-                ItemStack itemStack = new ItemStack(Material.COOKIE);
-                ItemMeta meta = itemStack.getItemMeta();
-                meta.setDisplayName("§6Amount of Cookies: §e" + cookieComponent.getCookies());
-                itemStack.setItemMeta(meta);
-
-                return new ItemStack[]{itemStack};
-            }
-        });
-        
         getCommand("cookie").setExecutor(new CookieCommand(this));
     }
 
-    private boolean setupTachyon() {
-        RegisteredServiceProvider<TachyonAPI> rsp = getServer().getServicesManager().getRegistration(TachyonAPI.class);
-        if (rsp == null) return false;
-        tachyon = rsp.getProvider();
-        return tachyon != null;
-    }
-
-    public TachyonAPI<ItemStack> getTachyon() {
+    public TachyonAPI getTachyon() {
         return tachyon;
     }
 }
 ```
 
-### 3. Access and Modify Player Data
-You can retrieve a player's profile and read/write their components with absolute thread-safety.
+### 3. Read and Mutate Player Data
+
+Access player profiles with thread safety, perform atomic in-memory mutations, and submit structured audit logs:
 
 ```java
 public class CookieCommand implements CommandExecutor {
 
-    private final TachyonAPI<ItemStack> tachyon;
+    private final TachyonCookies plugin;
 
     public CookieCommand(TachyonCookies plugin) {
-        this.tachyon = plugin.getTachyon();
+        this.plugin = plugin;
     }
 
     @Override
@@ -196,29 +240,30 @@ public class CookieCommand implements CommandExecutor {
         if (!(sender instanceof Player player)) return true;
 
         final UUID playerId = player.getUniqueId();
-        final TachyonProfile profile = tachyon.getProfile(playerId);
-        
+        final TachyonProfile profile = plugin.getTachyon().getTachyonProfileRegistry().getProfile(playerId);
+
         if (profile == null) {
-            player.sendMessage("§cError: Your profile is not loaded from Tachyon yet.");
+            player.sendMessage("§cYour profile is still loading from Tachyon...");
             return true;
         }
 
-        // Get the component. If the player doesn't have it, provide a default value (0 cookies)
-        CookieComponent component = profile.getComponent(CookieComponent.class, CookieComponent.newBuilder().setCookies(0).build());
+        // Retrieve component (or fallback to default if not present)
+        CookieComponent component = profile.getComponent(CookieComponent.class, new CookieComponent(0));
 
         if (args.length == 1 && args[0].equalsIgnoreCase("click")) {
-            long newCookiesAmount = component.getCookies() + 1;
+            long newAmount = component.cookiesAmount() + 1;
 
-            // Update the component in memory and automatically mark it as dirty for the backend
-            profile.updateComponent(CookieComponent.class, (CookieComponent.Builder builder) -> builder.setCookies(newCookiesAmount));
+            // Mutate component & mark dirty for async stream flushing
+            profile.updateComponent(CookieComponent.class, current -> current.toBuilder().cookiesAmount(newAmount).build());
 
-            // Log the action to the backend Audit Service
-            tachyon.getAuditService().log(playerId.toString(), "GAIN_COOKIES", "+1");
-            player.sendMessage("§6+1 Cookie! §e(Total: " + newCookiesAmount + ")");
+            // Log structured action to MongoDB TimeSeries Audit
+            plugin.getTachyon().getAuditService().log(AuditEntry.of(playerId, "COOKIE_MODULE", "GAIN_COOKIES", "+1"));
+
+            player.sendMessage("§6+1 Cookie! §e(Total: " + newAmount + ")");
             return true;
         }
 
-        player.sendMessage("§7Use §f/cookie click §7to gain more cookies.");
+        player.sendMessage("§7Use §f/cookie click §7to collect cookies.");
         return true;
     }
 }
@@ -226,19 +271,20 @@ public class CookieCommand implements CommandExecutor {
 
 ---
 
-## 📈 Observability & Grafana Integration
+## 📊 Turnkey Observability (Micrometer & Grafana)
 
-Tachyon is built with transparency in mind. It natively exports deep metrics to Prometheus, allowing you to monitor your entire network's health from a centralized Grafana instance.
+Tachyon embeds a native Micrometer metrics engine on port `9100` (configurable in `config.yml`).
 
-<details>
-  <summary><b>🛠️ JVM & Resources Dashboard</b> (Click to expand)</summary>
-  <p>Monitor CPU, RAM, Garbage Collection cycles, and open file descriptors to catch memory leaks before they crash your server.</p>
-  <img src=".github/images/Grafana-JVM.png" alt="JVM Dashboard">
-</details>
+The provided dashboard [`grafana/minecraft-monitoring.json`](grafana/minecraft-monitoring.json) includes:
 
-<details>
-  <summary><b>🎮 Minecraft Performance Dashboard</b> (Click to expand)</summary>
-  <p>Keep an eye on the actual game performance (TPS, MSPT, Chunks, Entities) alongside your data syncing.</p>
-  <img src=".github/images/Grafana-Minecraft.png" alt="Minecraft Dashboard">
-  <img src=".github/images/Grafana-Tachyon.png" alt="Minecraft Tachyon Dashboard">
-</details>
+* **⚡ gRPC & Network Health**: Real-time gRPC pure latency percentiles (P50, P95, P99), profile load duration, and error rates.
+* **🔒 Lock Contention & Safety**: Lock retry counters (`tachyon_plugin_player_locked_retries_total`) and exhausted lock kick alerts.
+* **🛡️ Resiliency & Storage**: Retry queue task count, local recovery file buffer size, and active cached profile counts.
+* **☕ JVM Internals**: Heap usage vs. commit limits, stacked memory pools (Eden, Old, Survivor, Metaspace), GC pause frequency and durations, thread states (RUNNABLE / BLOCKED / WAITING), and OS open file descriptors.
+* **🎮 Minecraft Performance**: Real-time TPS (1m/5m/15m), MSPT (P50/P95/P99), loaded chunks, and entity counts via Spark integration.
+
+---
+
+## 📄 License
+
+This project is licensed under the **GNU General Public License v3.0 (GPLv3)**. See the [LICENSE](LICENSE) file for details.
