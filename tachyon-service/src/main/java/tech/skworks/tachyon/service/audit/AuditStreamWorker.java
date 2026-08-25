@@ -1,13 +1,14 @@
 package tech.skworks.tachyon.service.audit;
 
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoCollection;
-import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.mongodb.reactive.ReactiveMongoClient;
+import io.quarkus.mongodb.reactive.ReactiveMongoCollection;
+import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.stream.ClaimedMessages;
-import io.quarkus.redis.datasource.stream.StreamCommands;
+import io.quarkus.redis.datasource.stream.ReactiveStreamCommands;
 import io.quarkus.redis.datasource.stream.StreamMessage;
 import io.quarkus.redis.datasource.stream.XReadGroupArgs;
 import io.quarkus.scheduler.Scheduled;
+import io.smallrye.mutiny.Uni;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -21,9 +22,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Worker that consumes audit logs from Redis Stream and batches them into MongoDB TimeSeries.
+ * Worker that consumes audit logs from Redis Stream and batches them into MongoDB TimeSeries reactively.
  *
  * <p><i>Project Tachyon</i></p>
  *
@@ -38,7 +40,7 @@ class AuditStreamWorker {
     Logger log;
 
     @Inject
-    MongoClient mongo;
+    ReactiveMongoClient mongo;
 
     @Inject
     AuditConfig config;
@@ -46,10 +48,11 @@ class AuditStreamWorker {
     @ConfigProperty(name = "quarkus.mongodb.database")
     String dbName;
 
-    private final StreamCommands<String, String, byte[]> redisStream;
-    private MongoCollection<Document> auditCollection;
+    private final ReactiveStreamCommands<String, String, byte[]> redisStream;
+    private ReactiveMongoCollection<Document> auditCollection;
+    private int reclaimCycle = 0;
 
-    public AuditStreamWorker(RedisDataSource redisDS) {
+    public AuditStreamWorker(ReactiveRedisDataSource redisDS) {
         this.redisStream = redisDS.stream(String.class, String.class, byte[].class);
     }
 
@@ -59,22 +62,30 @@ class AuditStreamWorker {
         log.infof("[AuditStreamWorker] Initialized with consumer ID '%s' on stream '%s'.", config.consumerId(), config.streamKey());
     }
 
-    @Scheduled(every = "1s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
-    void processAuditStream() {
-        try {
-            ClaimedMessages<String, String, byte[]> claimed = redisStream.xautoclaim(config.streamKey(), config.streamGroupName(), config.consumerId(), Duration.ofSeconds(30), "0", 100);
-            processAuditBatch(claimed.getMessages());
-
-            List<StreamMessage<String, String, byte[]>> fresh = redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(100));
-            processAuditBatch(fresh);
-
-        } catch (Exception e) {
-            log.error("Error in AuditStreamWorker loop", e);
-        }
+    @Scheduled(every = "1s", delay = 3L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    Uni<Void> processAuditStream() {
+        return readFreshMessages()
+                .chain(() -> (++reclaimCycle >= 20) ? reclaimAbandonedMessages() : Uni.createFrom().voidItem())
+                .onFailure().invoke(e -> log.error("[AuditStreamWorker] Error in audit stream loop", e))
+                .onFailure().recoverWithNull();
     }
 
-    private void processAuditBatch(List<StreamMessage<String, String, byte[]>> messages) {
-        if (messages == null || messages.isEmpty()) return;
+    private Uni<Void> readFreshMessages() {
+        return redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(100))
+                .chain(this::processAuditBatch);
+    }
+
+    private Uni<Void> reclaimAbandonedMessages() {
+        reclaimCycle = 0;
+        return redisStream.xautoclaim(config.streamKey(), config.streamGroupName(), config.consumerId(), Duration.ofSeconds(30), "0", 100)
+                .map(ClaimedMessages::getMessages)
+                .chain(this::processAuditBatch);
+    }
+
+    private Uni<Void> processAuditBatch(List<StreamMessage<String, String, byte[]>> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return Uni.createFrom().voidItem();
+        }
 
         List<Document> docsToInsert = new ArrayList<>();
         List<String> parsedIds = new ArrayList<>();
@@ -108,20 +119,20 @@ class AuditStreamWorker {
 
         List<String> idsToAck = new ArrayList<>(poisonIds);
 
-        if (!docsToInsert.isEmpty()) {
-            try {
-                auditCollection.insertMany(docsToInsert);
-                idsToAck.addAll(parsedIds);
-            } catch (Exception e) {
-                log.error("Audit insertMany failed — parsed messages left pending for retry.", e);
-            }
-        } else {
-            idsToAck.addAll(parsedIds);
-        }
+        Uni<Void> insertUni = docsToInsert.isEmpty()
+                ? Uni.createFrom().voidItem()
+                : auditCollection.insertMany(docsToInsert)
+                .invoke(() -> idsToAck.addAll(parsedIds))
+                .replaceWithVoid()
+                .onFailure().invoke(e -> log.error("Audit insertMany failed — parsed messages left pending for retry.", e))
+                .onFailure().recoverWithNull();
 
-        if (!idsToAck.isEmpty()) {
-            redisStream.xack(config.streamKey(), config.streamGroupName(), idsToAck.toArray(new String[0]));
-        }
+        return insertUni.chain(() -> {
+            if (!idsToAck.isEmpty()) {
+                return redisStream.xack(config.streamKey(), config.streamGroupName(), idsToAck.toArray(new String[0])).replaceWithVoid();
+            }
+            return Uni.createFrom().voidItem();
+        });
     }
 
     private Document convertBsonToMongoDoc(org.bson.BsonDocument bson) {

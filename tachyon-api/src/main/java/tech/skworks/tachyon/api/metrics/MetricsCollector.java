@@ -19,7 +19,6 @@ public abstract class MetricsCollector {
     }
 
     public abstract void start();
-    public abstract void warmMetrics();
     public abstract void updateMetrics();
     public abstract void stop();
 }

@@ -1,9 +1,9 @@
 package tech.skworks.tachyon.plugin.core.metric.scraper;
 
-import io.prometheus.client.CollectorRegistry;
-import io.prometheus.client.Counter;
-import io.prometheus.client.Gauge;
-import io.prometheus.client.Histogram;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.metrics.MetricsCollector;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
@@ -12,48 +12,65 @@ import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Project Tachyon
- * Class TachyonMetrics
+ * High-performance Tachyon gRPC and resilience metrics collector using Micrometer.
  *
- * @author  Jimmy (vSKAH) - 08/04/2026
- * @version 1.0
+ * <p><i>Project Tachyon</i></p>
+ *
+ * @author Jimmy (vSKAH) - 08/04/2026
+ * @version 2.0
  * @since 1.0.0-SNAPSHOT
  */
 public class TachyonMetrics extends MetricsCollector {
 
     private final Path datafolder;
+    private final MeterRegistry registry;
     private final ScheduledExecutorService scheduler;
 
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("TachyonMetrics");
-    public static final Histogram GRPC_LATENCY = Histogram.build().name("tachyon_plugin_grpc_latency_seconds").help("Latence des appels gRPC vers le backend Quarkus").labelNames("server_name", "method").buckets(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0).register();
-    public static final Counter GRPC_ERRORS = Counter.build().name("tachyon_plugin_grpc_errors_total").help("Erreurs rencontrées lors des appels gRPC").labelNames("server_name", "method", "error_type").register();
-    public static final Gauge PROFILES_LOADED = Gauge.build().name("tachyon_plugin_profiles_cached").help("Nombre de PlayerProfiles actuellement chargés en RAM").labelNames("server_name").register();
-    public static final Gauge RETRY_QUEUE_TASKS = Gauge.build().name("tachyon_plugin_retry_queue_tasks").help("Nombre total de tâches en attente de renvoi réseau").labelNames("server_name").register();
-    public static final Gauge RECOVERY_FILE_SIZE = Gauge.build().name("tachyon_plugin_recovery_file_bytes").help("Taille du fichier de secours (recovery.log) en octets").labelNames("server_name").register();
-    public static final Gauge RECOVERY_PENDING_FILES = Gauge.build().name("tachyon_plugin_recovery_pending_files").help("Nombre de fichiers .bin en attente dans le dossier recovery").labelNames("server_name").register();
 
-    public TachyonMetrics(@NotNull final String serverName, @NotNull final Path datafolder) {
+    private final AtomicInteger profilesCount = new AtomicInteger(0);
+    private final AtomicInteger retryQueueTasks = new AtomicInteger(0);
+    private final AtomicLong recoveryFileBytes = new AtomicLong(0);
+    private final AtomicInteger recoveryPendingFiles = new AtomicInteger(0);
+
+    private final Map<String, Timer> grpcTimers = new ConcurrentHashMap<>();
+    private final Map<String, Counter> grpcErrorCounters = new ConcurrentHashMap<>();
+
+    public TachyonMetrics(@NotNull final String serverName, @NotNull final Path datafolder, @NotNull final MeterRegistry registry) {
         super(serverName);
         this.datafolder = datafolder;
+        this.registry = registry;
         this.scheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("scheduler-tachyon-metrics").factory());
     }
 
     @Override
     public void start() {
-        this.warmMetrics();
-        this.scheduler.scheduleAtFixedRate(this::updateMetrics, 4, 4, TimeUnit.SECONDS);
-    }
+        Gauge.builder("tachyon_plugin_profiles_cached", profilesCount::get)
+                .tag("server_name", serverName)
+                .register(registry);
 
-    @Override
-    public void warmMetrics() {
-        PROFILES_LOADED.labels(serverName).set(0);
-        RETRY_QUEUE_TASKS.labels(serverName).set(0);
-        RECOVERY_FILE_SIZE.labels(serverName).set(0);
+        Gauge.builder("tachyon_plugin_retry_queue_tasks", retryQueueTasks::get)
+                .tag("server_name", serverName)
+                .register(registry);
+
+        Gauge.builder("tachyon_plugin_recovery_file_bytes", recoveryFileBytes::get)
+                .tag("server_name", serverName)
+                .register(registry);
+
+        Gauge.builder("tachyon_plugin_recovery_pending_files", recoveryPendingFiles::get)
+                .tag("server_name", serverName)
+                .register(registry);
+
+        this.scheduler.scheduleAtFixedRate(this::updateMetrics, 4, 4, TimeUnit.SECONDS);
     }
 
     @Override
@@ -62,8 +79,8 @@ public class TachyonMetrics extends MetricsCollector {
             Path dataDir = RecoveryLayout.dataDir(datafolder);
 
             if (!Files.isDirectory(dataDir)) {
-                RECOVERY_FILE_SIZE.labels(serverName).set(0);
-                RECOVERY_PENDING_FILES.labels(serverName).set(0);
+                recoveryFileBytes.set(0);
+                recoveryPendingFiles.set(0);
                 return;
             }
 
@@ -77,8 +94,8 @@ public class TachyonMetrics extends MetricsCollector {
                 }
             }
 
-            RECOVERY_FILE_SIZE.labels(serverName).set(totalSize);
-            RECOVERY_PENDING_FILES.labels(serverName).set(fileCount);
+            recoveryFileBytes.set(totalSize);
+            recoveryPendingFiles.set(fileCount);
 
         } catch (Exception e) {
             LOGGER.error(e, "Unable to read the recovery directory for metrics");
@@ -98,23 +115,69 @@ public class TachyonMetrics extends MetricsCollector {
                 LOGGER.error("Metrics scheduler shutdown interrupted.");
             }
         }
-
-        CollectorRegistry.defaultRegistry.clear();
     }
 
-    public Histogram.Timer startGrpcTimer(String method) {
-        return GRPC_LATENCY.labels(serverName, method).startTimer();
+    @FunctionalInterface
+    public interface MetricTimer extends AutoCloseable {
+        @Override
+        void close();
+    }
+
+    public MetricTimer startGrpcTimer(String method) {
+        Timer.Sample sample = Timer.start(registry);
+        return () -> sample.stop(getOrCreateTimer(method));
+    }
+
+    public MetricTimer startProfileLoadTimer() {
+        Timer.Sample sample = Timer.start(registry);
+        return () -> sample.stop(
+                Timer.builder("tachyon_plugin_profile_total_load_seconds")
+                        .tag("server_name", serverName)
+                        .publishPercentiles(0.5, 0.95, 0.99)
+                        .register(registry)
+        );
+    }
+
+    public void recordPlayerLockRetry() {
+        Counter.builder("tachyon_plugin_player_locked_retries_total")
+                .tag("server_name", serverName)
+                .register(registry)
+                .increment();
+    }
+
+    public void recordPlayerLockExhausted() {
+        Counter.builder("tachyon_plugin_player_locked_exhausted_total")
+                .tag("server_name", serverName)
+                .register(registry)
+                .increment();
     }
 
     public void recordGrpcError(String method, String errorType) {
-        GRPC_ERRORS.labels(serverName, method, errorType).inc();
+        String key = method + ":" + errorType;
+        grpcErrorCounters.computeIfAbsent(key, _ ->
+                Counter.builder("tachyon_plugin_grpc_errors_total")
+                        .tag("server_name", serverName)
+                        .tag("method", method)
+                        .tag("error_type", errorType)
+                        .register(registry)
+        ).increment();
     }
 
     public void updateProfilesCount(int count) {
-        PROFILES_LOADED.labels(serverName).set(count);
+        profilesCount.set(count);
     }
 
     public void updateRetryQueueSize(int totalTasks) {
-        RETRY_QUEUE_TASKS.labels(serverName).set(totalTasks);
+        retryQueueTasks.set(totalTasks);
+    }
+
+    private Timer getOrCreateTimer(String method) {
+        return grpcTimers.computeIfAbsent(method, m ->
+                Timer.builder("tachyon_plugin_grpc_latency_seconds")
+                        .tag("server_name", serverName)
+                        .tag("method", m)
+                        .publishPercentiles(0.5, 0.95, 0.99)
+                        .register(registry)
+        );
     }
 }

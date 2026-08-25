@@ -29,8 +29,24 @@ public abstract class AbstractGrpcService {
         this.backendStubProvider = backendStubProvider;
     }
 
-    public AutoCloseable startTimer(String method) {
+    public TachyonMetrics.MetricTimer startTimer(String method) {
         return tachyonMetrics != null ? tachyonMetrics.startGrpcTimer(method) : () -> {};
+    }
+
+    public TachyonMetrics.MetricTimer startProfileLoadTimer() {
+        return tachyonMetrics != null ? tachyonMetrics.startProfileLoadTimer() : () -> {};
+    }
+
+    public void recordPlayerLockRetry() {
+        if (tachyonMetrics != null) {
+            tachyonMetrics.recordPlayerLockRetry();
+        }
+    }
+
+    public void recordPlayerLockExhausted() {
+        if (tachyonMetrics != null) {
+            tachyonMetrics.recordPlayerLockExhausted();
+        }
     }
 
     public void recordError(String method, Exception e) {

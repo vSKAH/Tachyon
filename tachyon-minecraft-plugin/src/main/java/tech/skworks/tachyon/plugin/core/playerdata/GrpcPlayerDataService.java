@@ -70,57 +70,74 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
 
     }
 
+    private static final int MAX_PULL_ATTEMPTS = 5;
+    private static final long RETRY_BACKOFF_MS = 500L;
+
     @Override
     public @Nullable BsonDocument tryPullProfile(@NotNull final UUID uuid) {
-        int attempts = 0;
+        final RawBsonDocument rawRequest = BsonMarshaller.toRawBsonDocument(new BsonDocument("uuid", new BsonString(uuid.toString())));
 
-        BsonDocument requestDoc = new BsonDocument("uuid", new BsonString(uuid.toString()));
-        RawBsonDocument rawRequest = BsonMarshaller.toRawBsonDocument(requestDoc);
-
-        BsonDocument playerResponse = null;
-        try (var _ = startTimer("GetPlayer")) {
-            while (playerResponse == null && attempts < 6) {
-                attempts++;
+        try (var _ = startProfileLoadTimer()) {
+            for (int attempt = 1; attempt <= MAX_PULL_ATTEMPTS; attempt++) {
                 try {
-                    playerResponse = ClientCalls.blockingUnaryCall(
-                            backendStubProvider.getChannel(),
-                            DataContract.PULL_PROFILE_METHOD,
-                            CallOptions.DEFAULT.withDeadlineAfter(4, TimeUnit.SECONDS),
-                            rawRequest
-                    );
+                    try (var _ = startTimer("PullProfile")) {
+                        return ClientCalls.blockingUnaryCall(
+                                backendStubProvider.getChannel(),
+                                DataContract.PULL_PROFILE_METHOD,
+                                CallOptions.DEFAULT.withDeadlineAfter(4, TimeUnit.SECONDS),
+                                rawRequest
+                        );
+                    }
+
                 } catch (StatusRuntimeException e) {
                     Status status = e.getStatus();
+
                     if (status.getCode() == Status.Code.CANCELLED) {
                         String reason = status.getDescription() != null ? status.getDescription() : "LOCKED";
-                        LOGGER.info("load() retry {}/4 for {} — reason: {}", attempts, uuid, reason);
+                        LOGGER.info("tryPullProfile() retry {}/{} for {} — reason: {}", attempt, MAX_PULL_ATTEMPTS, uuid, reason);
+                        recordPlayerLockRetry();
 
-                        if (attempts >= 4) {
-                            LOGGER.error("load() exhausted 4 attempts (2 seconds) for {}. Player remains locked.", uuid);
+                        if (attempt == MAX_PULL_ATTEMPTS) {
+                            LOGGER.error("tryPullProfile() exhausted {} attempts for {}. Player remains locked.", MAX_PULL_ATTEMPTS, uuid);
+                            recordPlayerLockExhausted();
+                            recordError("PullProfile", "PLAYER_LOCKED");
                             return null;
                         }
 
-                        try {
-                            Thread.sleep(500);
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                            LOGGER.error("load() interrupted while waiting for {} to unlock", uuid);
-                            return null;
-                        }
+                        if (!sleepInterruptible(RETRY_BACKOFF_MS, uuid)) return null;
                         continue;
                     }
 
-                    LOGGER.error("load() gRPC infrastructure failure for {}: {}", uuid, status.getDescription());
-                    recordError("GetPlayer_Network", e);
+                    if (status.getCode() == Status.Code.UNAVAILABLE && attempt < MAX_PULL_ATTEMPTS) {
+                        LOGGER.warn("tryPullProfile() backend unavailable (attempt {}/{}) for {} — retrying...", attempt, MAX_PULL_ATTEMPTS, uuid);
+                        if (!sleepInterruptible(RETRY_BACKOFF_MS / 2, uuid)) return null;
+                        continue;
+                    }
+
+                    LOGGER.error("tryPullProfile() gRPC failure for {}: {} ({})", uuid, status.getCode(), status.getDescription());
+                    recordError("PullProfile", status.getCode().name());
+                    return null;
+
+                } catch (Exception e) {
+                    LOGGER.error(e, "tryPullProfile() unexpected fatal failure for {}", uuid);
+                    recordError("PullProfile", "FATAL");
                     return null;
                 }
             }
-        } catch (Exception e) {
-            LOGGER.error(e, "load() unexpected fatal failure for {}", uuid);
-            recordError("GetPlayer_Fatal", e);
-            return null;
         }
 
-        return playerResponse;
+        return null;
+    }
+
+    private boolean sleepInterruptible(long millis, UUID uuid) {
+        try {
+            Thread.sleep(millis);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOGGER.error("tryPullProfile() interrupted while waiting for {}", uuid);
+            return false;
+        }
     }
 
 

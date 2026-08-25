@@ -1,235 +1,203 @@
 package tech.skworks.tachyon.plugin.core.metric.scraper;
 
 import com.sun.management.UnixOperatingSystemMXBean;
-import io.prometheus.client.Counter;
-import io.prometheus.client.Gauge;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.binder.jvm.JvmGcMetrics;
+import io.micrometer.core.instrument.binder.jvm.JvmMemoryMetrics;
+import io.micrometer.core.instrument.binder.jvm.JvmThreadMetrics;
+import io.micrometer.core.instrument.binder.system.FileDescriptorMetrics;
+import io.micrometer.core.instrument.binder.system.ProcessorMetrics;
+import io.micrometer.core.instrument.binder.system.UptimeMetrics;
 import me.lucko.spark.api.Spark;
 import me.lucko.spark.api.SparkProvider;
 import me.lucko.spark.api.statistic.StatisticWindow;
-import me.lucko.spark.api.statistic.misc.DoubleAverageInfo;
-import me.lucko.spark.api.statistic.types.DoubleStatistic;
-import me.lucko.spark.api.statistic.types.GenericStatistic;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
-import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.metrics.MetricsCollector;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 
-import java.lang.management.ManagementFactory;
-import java.lang.management.OperatingSystemMXBean;
-import java.lang.management.ThreadMXBean;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 
-
 /**
- * Project Tachyon
- * Class VanillaMetrics
+ * High-performance Vanilla and Spark metrics collector using Micrometer.
  *
- * @author  Jimmy (vSKAH) - 07/04/2026
- * @version 1.0
+ * <p><i>Project Tachyon</i></p>
+ *
+ * @author Jimmy (vSKAH) - 07/04/2026
+ * @version 2.0
  * @since 1.0.0-SNAPSHOT
  */
 public class VanillaMetrics extends MetricsCollector {
 
     private final TachyonCore plugin;
-    private BukkitTask metricsTask;
+    private final MeterRegistry registry;
     private Handler errorAppender;
     private Spark spark;
 
-    //TODO: using micrometters
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("VanillaMetrics");
-    private static final Gauge TPS = Gauge.build().name("spigot_tps").help("Ticks par seconde (10s, 1m, 5m, 15m)").labelNames("server_name", "time_window").register();
-    private static final Gauge MSPT = Gauge.build().name("spigot_mspt").help("Millisecondes par tick (moyenne, max, 95th percentile)").labelNames("server_name", "metric_type", "time_window").register();
-    private static final Gauge CPU = Gauge.build().name("spigot_cpu_usage").help("Utilisation CPU (Processus et Système)").labelNames("server_name", "type", "time_window").register();
-    private static final Gauge THREADS = Gauge.build().name("spigot_jvm_threads").help("Nombre de threads actifs dans la JVM").labelNames("server_name").register();
-    private static final Gauge RAM = Gauge.build().name("spigot_memory_bytes").help("Utilisation de la RAM de la JVM").labelNames("server_name", "type").register();
-
-    private static final Gauge GC_COUNT = Gauge.build().name("spigot_gc_collections_total").help("Nombre total de passages du Garbage Collector").labelNames("server_name", "gc_name").register();
-    private static final Gauge GC_TIME = Gauge.build().name("spigot_gc_time_ms_total").help("Temps total passé dans le Garbage Collector en ms").labelNames("server_name", "gc_name").register();
-    private static final Gauge GC_AVG_TIME = Gauge.build().name("spigot_gc_avg_time_ms").help("Temps moyen d'une collection GC").labelNames("server_name", "gc_name").register();
-    private static final Gauge GC_AVG_FREQ = Gauge.build().name("spigot_gc_avg_frequency_ms").help("Fréquence moyenne des collections GC").labelNames("server_name", "gc_name").register();
-
-    private static final Gauge TOTAL_PLAYERS = Gauge.build().name("spigot_players_total").help("Joueurs uniques").labelNames("server_name").register();
-    private static final Gauge ONLINE_PLAYERS = Gauge.build().name("spigot_players_online").help("Joueurs connectés").labelNames("server_name").register();
-    private static final Gauge CHUNKS = Gauge.build().name("spigot_chunks_loaded").help("Nombre de chunks chargés par monde").labelNames("server_name", "world_name").register();
-
-    private static final Gauge ENTITIES = Gauge.build().name("spigot_entities_loaded").help("Nombre d'entités par monde").labelNames("server_name", "world_name").register();
-    private static final Gauge WORLDS = Gauge.build().name("spigot_worlds_loaded").help("Monde chargés").labelNames("server_name").register();
-    private static final Gauge PLUGINS = Gauge.build().name("spigot_plugins_loaded").help("Nombre de plugins installés et actifs").labelNames("server_name").register();
-    private static final Gauge UPTIME = Gauge.build().name("spigot_jvm_uptime_ms").help("Temps depuis le démarrage du serveur (Uptime)").labelNames("server_name").register();
-    private static final Gauge OPEN_FILES = Gauge.build().name("spigot_jvm_open_files").help("Nombre de descripteurs de fichiers ouverts (Sockets, Fichiers)").labelNames("server_name").register();
-
-    private static final Counter CONSOLE_LOGS = Counter.build().name("spigot_console_logs_total").help("Compteur d'erreurs et alertes dans la console").labelNames("server_name", "level").register();
-
     private static long totalPlayers = 0;
 
-    public VanillaMetrics(@NotNull String serverName, TachyonCore plugin) {
+    private JvmGcMetrics jvmGcMetrics;
+    private final Map<String, Counter> logCounters = new ConcurrentHashMap<>();
+
+    public VanillaMetrics(@NotNull String serverName, TachyonCore plugin, MeterRegistry meterRegistry) {
         super(serverName);
         this.plugin = plugin;
+        this.registry = meterRegistry;
     }
 
     @Override
     public void start() {
+        new JvmMemoryMetrics(Tags.of("server_name", serverName)).bindTo(registry);
+        this.jvmGcMetrics = new JvmGcMetrics(Tags.of("server_name", serverName));
+        this.jvmGcMetrics.bindTo(registry);
+        new JvmThreadMetrics(Tags.of("server_name", serverName)).bindTo(registry);
+        new ProcessorMetrics(Tags.of("server_name", serverName)).bindTo(registry);
+        new FileDescriptorMetrics(Tags.of("server_name", serverName)).bindTo(registry);
+        new UptimeMetrics(Tags.of("server_name", serverName)).bindTo(registry);
+
+        totalPlayers = Bukkit.getOfflinePlayers().length;
+
+        Gauge.builder("spigot_players_online", Bukkit.getOnlinePlayers()::size)
+                .tag("server_name", serverName)
+                .register(registry);
+
+        Gauge.builder("spigot_players_total", () -> totalPlayers)
+                .tag("server_name", serverName)
+                .register(registry);
+
+        Gauge.builder("spigot_worlds_loaded", () -> Bukkit.getWorlds().size())
+                .tag("server_name", serverName)
+                .register(registry);
+
+        Gauge.builder("spigot_plugins_loaded", () -> Bukkit.getPluginManager().getPlugins().length)
+                .tag("server_name", serverName)
+                .register(registry);
+
+
+        Gauge.builder("spigot_chunks_loaded", this::getTotalLoadedChunks)
+                .tags("server_name", serverName, "world_name", "all_worlds")
+                .register(registry);
+
+        Gauge.builder("spigot_entities_loaded", this::getTotalEntities)
+                .tags("server_name", serverName, "world_name", "all_worlds")
+                .register(registry);
+
         if (Bukkit.getPluginManager().getPlugin("spark") == null) {
-            LOGGER.warn("Spark plugin not found. Spark must be installed to use vanilla metrics.");
-            return;
-        }
-        try {
-            this.spark = SparkProvider.get();
-            LOGGER.info("Successfully hooked into Spark Profiler API!");
-        } catch (Exception e) {
-            LOGGER.error(e, "Found Spark but failed to get API");
-            return;
+            LOGGER.warn("Spark plugin not found. Spark metrics will not be available.");
+        } else {
+            try {
+                this.spark = SparkProvider.get();
+                registerSparkMetrics();
+                LOGGER.info("Successfully hooked into Spark Profiler API!");
+            } catch (Exception e) {
+                LOGGER.error(e, "Found Spark but failed to register Spark metrics");
+            }
         }
 
         attachBukkitHandler();
-        warmMetrics();
-        totalPlayers = Bukkit.getOfflinePlayers().length;
-        this.metricsTask = Bukkit.getScheduler().runTaskTimer(plugin, this::updateMetrics, 100L, 100L);
     }
 
-    @Override
-    public void warmMetrics() {
-        ONLINE_PLAYERS.labels(serverName).set(0);
-        TOTAL_PLAYERS.labels(serverName).set(0);
-        WORLDS.labels(serverName).set(0);
-        PLUGINS.labels(serverName).set(0);
-        UPTIME.labels(serverName).set(0);
-        OPEN_FILES.labels(serverName).set(0);
-        THREADS.labels(serverName).set(0);
+    private void registerSparkMetrics() {
+        registerTpsGauge("5s", StatisticWindow.TicksPerSecond.SECONDS_5);
+        registerTpsGauge("10s", StatisticWindow.TicksPerSecond.SECONDS_10);
+        registerTpsGauge("1m", StatisticWindow.TicksPerSecond.MINUTES_1);
+        registerTpsGauge("5m", StatisticWindow.TicksPerSecond.MINUTES_5);
+        registerTpsGauge("15m", StatisticWindow.TicksPerSecond.MINUTES_15);
 
-        RAM.labels(serverName, "max").set(0);
-        RAM.labels(serverName, "free").set(0);
-        RAM.labels(serverName, "used").set(0);
-
-        for (String window : List.of("5s", "10s", "1m", "5m", "15m")) {
-            TPS.labels(serverName, window).set(0);
+        for (StatisticWindow.MillisPerTick window : List.of(StatisticWindow.MillisPerTick.SECONDS_10, StatisticWindow.MillisPerTick.MINUTES_1, StatisticWindow.MillisPerTick.MINUTES_5)) {
+            String windowStr = window == StatisticWindow.MillisPerTick.SECONDS_10 ? "10s" : (window == StatisticWindow.MillisPerTick.MINUTES_1 ? "1m" : "5m");
+            registerMsptGauge(window, windowStr, "mean");
+            registerMsptGauge(window, windowStr, "min");
+            registerMsptGauge(window, windowStr, "max");
+            registerMsptGauge(window, windowStr, "95th");
+            registerMsptGauge(window, windowStr, "median");
         }
-        for (String window : List.of("10s", "1m", "5m")) {
-            for (String type : List.of("mean", "min", "max", "95th", "median")) {
-                MSPT.labels(serverName, type, window).set(0);
+
+        for (StatisticWindow.CpuUsage window : List.of(StatisticWindow.CpuUsage.SECONDS_10, StatisticWindow.CpuUsage.MINUTES_1, StatisticWindow.CpuUsage.MINUTES_15)) {
+            String windowStr = window == StatisticWindow.CpuUsage.SECONDS_10 ? "10s" : (window == StatisticWindow.CpuUsage.MINUTES_1 ? "1m" : "15m");
+            Gauge.builder("spigot_cpu_usage", () -> spark != null && spark.cpuProcess() != null ? spark.cpuProcess().poll(window) : 0.0)
+                    .tags("server_name", serverName, "type", "process", "time_window", windowStr)
+                    .register(registry);
+
+            Gauge.builder("spigot_cpu_usage", () -> spark != null && spark.cpuSystem() != null ? spark.cpuSystem().poll(window) : 0.0)
+                    .tags("server_name", serverName, "type", "system", "time_window", windowStr)
+                    .register(registry);
+        }
+
+        if (spark != null && spark.gc() != null) {
+            for (String gcKey : spark.gc().keySet()) {
+                String gcName = gcKey.replace(" ", "_");
+
+                Gauge.builder("spigot_gc_collections_total", () -> {
+                    var gc = spark != null && spark.gc() != null ? spark.gc().get(gcKey) : null;
+                    return gc != null ? gc.totalCollections() : 0;
+                }).tags("server_name", serverName, "gc_name", gcName).register(registry);
+
+                Gauge.builder("spigot_gc_time_ms_total", () -> {
+                    var gc = spark != null && spark.gc() != null ? spark.gc().get(gcKey) : null;
+                    return gc != null ? gc.totalTime() : 0;
+                }).tags("server_name", serverName, "gc_name", gcName).register(registry);
+
+                Gauge.builder("spigot_gc_avg_time_ms", () -> {
+                    var gc = spark != null && spark.gc() != null ? spark.gc().get(gcKey) : null;
+                    return gc != null ? gc.avgTime() : 0.0;
+                }).tags("server_name", serverName, "gc_name", gcName).register(registry);
+
+                Gauge.builder("spigot_gc_avg_frequency_ms", () -> {
+                    var gc = spark != null && spark.gc() != null ? spark.gc().get(gcKey) : null;
+                    return gc != null ? gc.avgFrequency() : 0;
+                }).tags("server_name", serverName, "gc_name", gcName).register(registry);
             }
         }
-        for (String type : List.of("process", "system")) {
-            for (String window : List.of("10s", "1m", "15m")) {
-                CPU.labels(serverName, type, window).set(0);
-            }
-        }
-
-        CONSOLE_LOGS.labels(serverName, "WARN").inc(0);
-        CONSOLE_LOGS.labels(serverName, "ERROR").inc(0);
-        CONSOLE_LOGS.labels(serverName, "FATAL").inc(0);
     }
 
-    public void updateMetrics() {
-        if (plugin.tachyonCoreDisabling()) return;
+    private void registerTpsGauge(String windowStr, StatisticWindow.TicksPerSecond window) {
+        Gauge.builder("spigot_tps", () -> spark != null && spark.tps() != null ? spark.tps().poll(window) : 20.0)
+                .tags("server_name", serverName, "time_window", windowStr)
+                .register(registry);
+    }
 
-        final int worldsCount = Bukkit.getWorlds().size();
-        final int pluginsCount = Bukkit.getPluginManager().getPlugins().length;
-        final int onlinePlayerCount = Bukkit.getOnlinePlayers().size();
+    private void registerMsptGauge(StatisticWindow.MillisPerTick window, String windowStr, String type) {
+        Gauge.builder("spigot_mspt", () -> {
+            if (spark == null || spark.mspt() == null) return 0.0;
+            var stat = spark.mspt().poll(window);
+            if (stat == null) return 0.0;
+            return switch (type) {
+                case "mean" -> stat.mean();
+                case "min" -> stat.min();
+                case "max" -> stat.max();
+                case "95th" -> stat.percentile95th();
+                case "median" -> stat.median();
+                default -> 0.0;
+            };
+        }).tags("server_name", serverName, "metric_type", type, "time_window", windowStr).register(registry);
+    }
 
-        int totalEntities = 0;
-        int totalChunks = 0;
+    private double getTotalLoadedChunks() {
+        int chunks = 0;
         for (World world : Bukkit.getWorlds()) {
-            totalEntities += world.getEntities().size();
-            totalChunks += world.getLoadedChunks().length;
+            chunks += world.getLoadedChunks().length;
         }
-
-        final int finalEntities = totalEntities;
-        final int finalChunks = totalChunks;
-
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            try {
-                ONLINE_PLAYERS.labels(serverName).set(onlinePlayerCount);
-
-                TOTAL_PLAYERS.labels(serverName).set(totalPlayers);
-
-                ENTITIES.labels(serverName, "all_worlds").set(finalEntities);
-                CHUNKS.labels(serverName, "all_worlds").set(finalChunks);
-                WORLDS.labels(serverName).set(worldsCount);
-
-                PLUGINS.labels(serverName).set(pluginsCount);
-                UPTIME.labels(serverName).set(ManagementFactory.getRuntimeMXBean().getUptime());
-                OperatingSystemMXBean os = ManagementFactory.getOperatingSystemMXBean();
-                if (os instanceof UnixOperatingSystemMXBean linux) {
-                    OPEN_FILES.labels(serverName).set(linux.getOpenFileDescriptorCount());
-                }
-
-
-                var tpsStat = spark.tps();
-                if (tpsStat != null) {
-                    getTpsStats(tpsStat);
-                }
-
-                var msptStat = spark.mspt();
-                if (msptStat != null) {
-                    getMsptStats(msptStat, StatisticWindow.MillisPerTick.SECONDS_10, "10s");
-                    getMsptStats(msptStat, StatisticWindow.MillisPerTick.MINUTES_1, "1m");
-                    getMsptStats(msptStat, StatisticWindow.MillisPerTick.MINUTES_5, "5m");
-                }
-
-                getCpuStats(spark.cpuProcess(), "process");
-                getCpuStats(spark.cpuSystem(), "system");
-
-                for (var entry : spark.gc().entrySet()) {
-                    String gcName = entry.getKey().replace(" ", "_");
-                    var gcStat = entry.getValue();
-
-                    GC_COUNT.labels(serverName, gcName).set(gcStat.totalCollections());
-                    GC_TIME.labels(serverName, gcName).set(gcStat.totalTime());
-                    GC_AVG_TIME.labels(serverName, gcName).set(gcStat.avgTime());
-                    long avgFreq = gcStat.avgFrequency();
-                    if (avgFreq > 0) {
-                        GC_AVG_FREQ.labels(serverName, gcName).set(avgFreq);
-                    }
-                }
-
-
-                Runtime runtime = Runtime.getRuntime();
-                RAM.labels(serverName, "max").set(runtime.maxMemory());
-                RAM.labels(serverName, "free").set(runtime.freeMemory());
-                RAM.labels(serverName, "used").set(runtime.totalMemory() - runtime.freeMemory());
-
-                ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
-                THREADS.labels(serverName).set(threadBean.getThreadCount());
-            } catch (Exception e) {
-                LOGGER.error(e,"Fatal error during metrics collection");
-            }
-        });
+        return chunks;
     }
 
-    @Override
-    public void stop() {
-        if (metricsTask != null) metricsTask.cancel();
-        detachBukkitHandler();
-    }
-
-    private void getMsptStats(GenericStatistic<DoubleAverageInfo, StatisticWindow.MillisPerTick> msptStat, StatisticWindow.MillisPerTick time, String key) {
-        var msptStats = msptStat.poll(time);
-        MSPT.labels(serverName, "mean", key).set(msptStats.mean());
-        MSPT.labels(serverName, "min", key).set(msptStats.min());
-        MSPT.labels(serverName, "max", key).set(msptStats.max());
-        MSPT.labels(serverName, "95th", key).set(msptStats.percentile95th());
-        MSPT.labels(serverName, "median", key).set(msptStats.median());
-    }
-
-    private void getTpsStats(DoubleStatistic<StatisticWindow.TicksPerSecond> statistic) {
-        TPS.labels(serverName, "5s").set(statistic.poll(StatisticWindow.TicksPerSecond.SECONDS_5));
-        TPS.labels(serverName, "10s").set(statistic.poll(StatisticWindow.TicksPerSecond.SECONDS_10));
-        TPS.labels(serverName, "1m").set(statistic.poll(StatisticWindow.TicksPerSecond.MINUTES_1));
-        TPS.labels(serverName, "5m").set(statistic.poll(StatisticWindow.TicksPerSecond.MINUTES_5));
-        TPS.labels(serverName, "15m").set(statistic.poll(StatisticWindow.TicksPerSecond.MINUTES_15));
-    }
-
-    private void getCpuStats(DoubleStatistic<StatisticWindow.CpuUsage> statistic, String key) {
-        CPU.labels(serverName, key, "10s").set(statistic.poll(StatisticWindow.CpuUsage.SECONDS_10));
-        CPU.labels(serverName, key, "1m").set(statistic.poll(StatisticWindow.CpuUsage.MINUTES_1));
-        CPU.labels(serverName, key, "15m").set(statistic.poll(StatisticWindow.CpuUsage.MINUTES_15));
+    private double getTotalEntities() {
+        int entities = 0;
+        for (World world : Bukkit.getWorlds()) {
+            entities += world.getEntities().size();
+        }
+        return entities;
     }
 
     private void attachBukkitHandler() {
@@ -238,7 +206,13 @@ public class VanillaMetrics extends MetricsCollector {
             public void publish(LogRecord record) {
                 Level level = record.getLevel();
                 if (level == Level.SEVERE || level == Level.WARNING) {
-                    CONSOLE_LOGS.labels(serverName, level.getName()).inc();
+                    String levelName = level.getName();
+                    logCounters.computeIfAbsent(levelName, l ->
+                            Counter.builder("spigot_console_logs_total")
+                                    .tag("server_name", serverName)
+                                    .tag("level", l)
+                                    .register(registry)
+                    ).increment();
                 }
             }
 
@@ -249,13 +223,25 @@ public class VanillaMetrics extends MetricsCollector {
             public void close() throws SecurityException {}
         };
 
-        org.bukkit.Bukkit.getLogger().addHandler(errorAppender);
+        Bukkit.getLogger().addHandler(errorAppender);
     }
 
     private void detachBukkitHandler() {
         if (errorAppender != null) {
-            org.bukkit.Bukkit.getLogger().removeHandler(errorAppender);
+            Bukkit.getLogger().removeHandler(errorAppender);
         }
+    }
+
+    @Override
+    public void updateMetrics() {}
+
+    @Override
+    public void stop() {
+        if (jvmGcMetrics != null) {
+            jvmGcMetrics.close();
+            jvmGcMetrics = null;
+        }
+        detachBukkitHandler();
     }
 
     public static void incrementTotalPlayers() {

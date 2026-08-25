@@ -1,16 +1,18 @@
 package tech.skworks.tachyon.service.player.data;
 
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.*;
-import io.quarkus.redis.datasource.RedisDataSource;
-import io.quarkus.redis.datasource.keys.KeyCommands;
+import io.quarkus.mongodb.FindOptions;
+import io.quarkus.mongodb.reactive.ReactiveMongoClient;
+import io.quarkus.mongodb.reactive.ReactiveMongoCollection;
+import io.quarkus.redis.datasource.ReactiveRedisDataSource;
+import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
 import io.quarkus.redis.datasource.stream.ClaimedMessages;
-import io.quarkus.redis.datasource.stream.StreamCommands;
+import io.quarkus.redis.datasource.stream.ReactiveStreamCommands;
 import io.quarkus.redis.datasource.stream.StreamMessage;
 import io.quarkus.redis.datasource.stream.XReadGroupArgs;
-import io.quarkus.redis.datasource.value.ValueCommands;
+import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.scheduler.Scheduled;
+import io.smallrye.mutiny.Uni;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -31,10 +33,11 @@ import static tech.skworks.tachyon.service.player.data.PlayerDataGrpcService.toB
 
 /**
  * Project Tachyon
- * Class PlayerStreamWorker
+ * Class PlayerDataStreamWorker
+ * Fully Reactive Player Data Stream Processor
  *
  * @author  Jimmy (vSKAH) - 06/04/2026
- * @version 1.0
+ * @version 2.0
  * @since 1.0.0-SNAPSHOT
  */
 @ApplicationScoped
@@ -42,22 +45,25 @@ class PlayerDataStreamWorker {
 
     @Inject
     Logger log;
+
     @Inject
-    MongoClient mongo;
+    ReactiveMongoClient mongo;
+
     @Inject
     PlayerConfig config;
 
     @ConfigProperty(name = "quarkus.mongodb.database")
     String dbName;
 
-    private final StreamCommands<String, String, byte[]> redisStream;
-    private final ValueCommands<String, byte[]> redisBytes;
-    private final KeyCommands<String> redisKey;
+    private final ReactiveStreamCommands<String, String, byte[]> redisStream;
+    private final ReactiveValueCommands<String, byte[]> redisBytes;
+    private final ReactiveKeyCommands<String> redisKey;
+    private int reclaimCycle = 0;
 
-    private MongoCollection<Document> playersCollection;
-    private MongoCollection<RawBsonDocument> rawPlayersCollection;
+    private ReactiveMongoCollection<Document> playersCollection;
+    private ReactiveMongoCollection<RawBsonDocument> rawPlayersCollection;
 
-    public PlayerDataStreamWorker(RedisDataSource redisDS) {
+    public PlayerDataStreamWorker(ReactiveRedisDataSource redisDS) {
         this.redisStream = redisDS.stream(String.class, String.class, byte[].class);
         this.redisBytes = redisDS.value(byte[].class);
         this.redisKey = redisDS.key();
@@ -71,25 +77,29 @@ class PlayerDataStreamWorker {
     }
 
     @Scheduled(every = "1s", delay = 3L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
-    void processStream() {
-        try {
-
-            ClaimedMessages<String, String, byte[]> claimed = redisStream.xautoclaim(config.streamKey(), config.streamGroupName(), config.consumerId(), Duration.ofSeconds(30), "0", 100);
-            processAndAck(claimed.getMessages(), "reclaimed");
-
-            List<StreamMessage<String, String, byte[]>> fresh = redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(200));
-            if (fresh != null && !fresh.isEmpty()) {
-                processAndAck(fresh, "new");
-            }
-
-
-        } catch (Exception e) {
-            log.error("[PlayerStreamWorker] Error in stream processing loop.", e);
-        }
+    Uni<Void> processStream() {
+        return readFreshMessages()
+                .chain(() -> (++reclaimCycle >= 20) ? reclaimAbandonedMessages() : Uni.createFrom().voidItem())
+                .onFailure().invoke(e -> log.error("[PlayerStreamWorker] Error in stream processing loop.", e))
+                .onFailure().recoverWithNull();
     }
 
-    private void processAndAck(List<StreamMessage<String, String, byte[]>> messages, String origin) {
-        if (messages == null || messages.isEmpty()) return;
+    private Uni<Void> readFreshMessages() {
+        return redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(200))
+                .chain(messages -> processAndAck(messages, "new"));
+    }
+
+    private Uni<Void> reclaimAbandonedMessages() {
+        reclaimCycle = 0;
+        return redisStream.xautoclaim(config.streamKey(), config.streamGroupName(), config.consumerId(), Duration.ofSeconds(30), "0", 100)
+                .map(ClaimedMessages::getMessages)
+                .chain(messages -> processAndAck(messages, "reclaimed"));
+    }
+
+    private Uni<Void> processAndAck(List<StreamMessage<String, String, byte[]>> messages, String origin) {
+        if (messages == null || messages.isEmpty()) {
+            return Uni.createFrom().voidItem();
+        }
 
         log.debugf("[PlayerStreamWorker] Processing %d %s message(s) from stream.", messages.size(), origin);
 
@@ -128,28 +138,29 @@ class PlayerDataStreamWorker {
             }
         }
 
-        if (!bulkOperations.isEmpty()) {
-            try {
-                playersCollection.bulkWrite(bulkOperations, new BulkWriteOptions().ordered(false));
-                log.infof("[PlayerStreamWorker] BulkWrite written %d operation(s) to MongoDB in 1 network call.", bulkOperations.size());
-            } catch (Exception e) {
-                log.error("[PlayerStreamWorker] Error during MongoDB bulkWrite batch execution.", e);
-                return;
-            }
-        }
+        Uni<Void> mongoUni = bulkOperations.isEmpty()
+                ? Uni.createFrom().voidItem()
+                : playersCollection.bulkWrite(bulkOperations, new BulkWriteOptions().ordered(false))
+                .invoke(res -> log.infof("[PlayerStreamWorker] BulkWrite written %d operation(s) to MongoDB in 1 network call.", bulkOperations.size()))
+                .replaceWithVoid()
+                .onFailure().invoke(e -> log.error("[PlayerStreamWorker] Error during MongoDB bulkWrite batch execution.", e))
+                .onFailure().recoverWithNull();
 
-        if (!updatedUuids.isEmpty()) {
-            updateCacheBatchAndUnlock(updatedUuids);
-        }
-
-        if (!messagesToAck.isEmpty()) {
-            redisStream.xack(config.streamKey(), config.streamGroupName(), messagesToAck.toArray(new String[0]));
-        }
-
-        if (failed > 0)
-            log.warnf("[PlayerStreamWorker] %s cycle — %d ACKed, %d left pending for retry.", origin, messagesToAck.size(), failed);
-        else
-            log.debugf("[PlayerStreamWorker] %s cycle — %d message(s) processed successfully.", origin, messagesToAck.size());
+        final int finalFailed = failed;
+        return mongoUni
+                .chain(() -> updateCacheBatchAndUnlock(updatedUuids))
+                .chain(() -> {
+                    if (!messagesToAck.isEmpty()) {
+                        return redisStream.xack(config.streamKey(), config.streamGroupName(), messagesToAck.toArray(new String[0])).replaceWithVoid();
+                    }
+                    return Uni.createFrom().voidItem();
+                })
+                .invoke(() -> {
+                    if (finalFailed > 0)
+                        log.warnf("[PlayerStreamWorker] %s cycle — %d ACKed, %d left pending for retry.", origin, messagesToAck.size(), finalFailed);
+                    else
+                        log.debugf("[PlayerStreamWorker] %s cycle — %d message(s) processed successfully.", origin, messagesToAck.size());
+                });
     }
 
     private Document buildUpdateOperations(RawBsonDocument reqDoc) {
@@ -184,27 +195,34 @@ class PlayerDataStreamWorker {
     }
 
     private static final Bson PROJECTION = Projections.fields(Projections.include("uuid", "components"), Projections.excludeId());
+    private static final FindOptions FIND_OPTIONS = new FindOptions().projection(PROJECTION);
 
-    private void updateCacheBatchAndUnlock(List<String> uuids) {
+    private Uni<Void> updateCacheBatchAndUnlock(List<String> uuids) {
+        if (uuids == null || uuids.isEmpty()) {
+            return Uni.createFrom().voidItem();
+        }
         final var uniqueUuids = new HashSet<>(uuids);
 
-        try {
-            List<RawBsonDocument> docs = rawPlayersCollection.find(Filters.in("uuid", uniqueUuids)).projection(PROJECTION).into(new ArrayList<>());
-
-            for (RawBsonDocument updatedDoc : docs) {
-                String uuid = updatedDoc.getString("uuid").getValue();
-                byte[] cacheBytes = toByteArray(updatedDoc);
-                redisBytes.setex(RedisKeys.cache(uuid), RedisKeys.CACHE_TTL_SECONDS, cacheBytes);
-                log.debugf("[PlayerStreamWorker] Cache updated for %s (%d bytes).", uuid, cacheBytes.length);
-            }
-        } catch (Exception e) {
-            log.errorf(e, "[PlayerStreamWorker] Failed to batch update cache for %d player(s).", uniqueUuids.size());
-        } finally {
-            List<String> dirtyKeys = uniqueUuids.stream().map(RedisKeys::dirty).toList();
-            if (!dirtyKeys.isEmpty()) {
-                redisKey.del(dirtyKeys.toArray(new String[0]));
-                log.debugf("[PlayerStreamWorker] Released %d dirty key(s) in bulk Redis call.", dirtyKeys.size());
-            }
-        }
+        return rawPlayersCollection.find(Filters.in("uuid", uniqueUuids), FIND_OPTIONS).collect().asList()
+                .chain(docs -> {
+                    List<Uni<Void>> setexUnis = new ArrayList<>();
+                    for (RawBsonDocument updatedDoc : docs) {
+                        String uuid = updatedDoc.getString("uuid").getValue();
+                        byte[] cacheBytes = toByteArray(updatedDoc);
+                        setexUnis.add(redisBytes.setex(RedisKeys.cache(uuid), RedisKeys.CACHE_TTL_SECONDS, cacheBytes).invoke(() -> log.debugf("[PlayerStreamWorker] Cache updated for %s (%d bytes).", uuid, cacheBytes.length)));
+                    }
+                    return setexUnis.isEmpty() ? Uni.createFrom().voidItem() : Uni.combine().all().unis(setexUnis).discardItems();
+                })
+                .onFailure().invoke(e -> log.errorf(e, "[PlayerStreamWorker] Failed to batch update cache for %d player(s).", uniqueUuids.size()))
+                .onFailure().recoverWithNull()
+                .eventually(() -> {
+                    List<String> dirtyKeys = uniqueUuids.stream().map(RedisKeys::dirty).toList();
+                    if (!dirtyKeys.isEmpty()) {
+                        return redisKey.del(dirtyKeys.toArray(new String[0]))
+                                .invoke(deleted -> log.debugf("[PlayerStreamWorker] Released %d dirty key(s) in bulk Redis call.", dirtyKeys.size()))
+                                .replaceWithVoid();
+                    }
+                    return Uni.createFrom().voidItem();
+                });
     }
 }

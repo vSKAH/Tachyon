@@ -1,24 +1,30 @@
 package tech.skworks.tachyon.plugin.core.metric;
 
-import io.prometheus.client.exporter.HTTPServer;
+import com.sun.net.httpserver.HttpServer;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.core.metric.scraper.TachyonMetrics;
 import tech.skworks.tachyon.plugin.core.metric.scraper.VanillaMetrics;
 
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+
 /**
  * Project Tachyon
- * Class MetricManager
+ * Class MetricsService
  *
- * @author  Jimmy (vSKAH) - 08/04/2026
- * @version 1.0
+ * @author Jimmy (vSKAH) - 08/04/2026
+ * @version 2.0
  * @since 1.0.0-SNAPSHOT
  */
 public class MetricsService {
 
-    //TODO: dynamicly injects metrics collectors
-    private HTTPServer httpServer;
+    private HttpServer httpServer;
+    private final PrometheusMeterRegistry registry;
     private final TachyonMetrics tachyonMetrics;
     private final VanillaMetrics vanillaMetrics;
 
@@ -28,19 +34,38 @@ public class MetricsService {
 
     public MetricsService(String serverName, TachyonCore javaPlugin) {
         this.collectionRunning = false;
-        this.tachyonMetrics = new TachyonMetrics(serverName, javaPlugin.getDataFolder().toPath());
-        this.vanillaMetrics = new VanillaMetrics(serverName, javaPlugin);
+        this.registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+
+        this.tachyonMetrics = new TachyonMetrics(serverName, javaPlugin.getDataFolder().toPath(), registry);
+        this.vanillaMetrics = new VanillaMetrics(serverName, javaPlugin, registry);
     }
 
     public void startMetricsCollection(@NotNull MetricsConfig metricsConfig) {
-
         if (metricsConfig.metricsPort() <= 0) {
             LOGGER.warn("Unable to start metrics on {}:{}", metricsConfig.metricsHost(), metricsConfig.metricsPort());
             return;
         }
 
         try {
-            httpServer = new HTTPServer(metricsConfig.metricsHost(), metricsConfig.metricsPort());
+            httpServer = HttpServer.create(new InetSocketAddress(metricsConfig.metricsHost(), metricsConfig.metricsPort()), 0);
+            httpServer.createContext("/metrics", httpExchange -> {
+                try {
+                    String response = registry.scrape();
+                    byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
+                    httpExchange.getResponseHeaders().set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+                    httpExchange.sendResponseHeaders(200, bytes.length);
+                    try (OutputStream os = httpExchange.getResponseBody()) {
+                        os.write(bytes);
+                    }
+                } catch (Exception e) {
+                    LOGGER.error(e, "Error serving /metrics HTTP request");
+                    httpExchange.sendResponseHeaders(500, -1);
+                } finally {
+                    httpExchange.close();
+                }
+            });
+            httpServer.start();
+
             tachyonMetrics.start();
             LOGGER.info("Metrics collection 'Tachyon' has been started");
             vanillaMetrics.start();
@@ -48,7 +73,7 @@ public class MetricsService {
             collectionRunning = true;
         } catch (Exception e) {
             if (httpServer != null) {
-                httpServer.close();
+                httpServer.stop(0);
                 httpServer = null;
             }
             LOGGER.error(e, "Unable to start metrics on {}:{}", metricsConfig.metricsHost(), metricsConfig.metricsPort());
@@ -65,16 +90,16 @@ public class MetricsService {
 
         vanillaMetrics.stop();
         LOGGER.info("Metrics collection 'Vanilla' has been stopped");
-        httpServer.close();
-        httpServer = null;
+
+        if (httpServer != null) {
+            httpServer.stop(0);
+            httpServer = null;
+        }
+        collectionRunning = false;
     }
 
     public boolean metricsCollectionRunning() {
         return httpServer != null && collectionRunning;
-    }
-
-    public VanillaMetrics getVanillaMetrics() {
-        return vanillaMetrics;
     }
 
     public TachyonMetrics getTachyonMetrics() {
