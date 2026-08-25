@@ -1,13 +1,19 @@
 package tech.skworks.tachyon.plugin.core.audit;
 
+import io.grpc.CallOptions;
+import io.grpc.StatusRuntimeException;
+import io.grpc.stub.ClientCalls;
+import org.bson.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import tech.skworks.tachyon.api.services.AuditService;
-import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
+import tech.skworks.tachyon.api.audit.AuditEntry;
+import tech.skworks.tachyon.api.audit.AuditLevel;
+import tech.skworks.tachyon.api.audit.AuditService;
+import tech.skworks.tachyon.common.contract.AuditContract;
+import tech.skworks.tachyon.common.marshaller.BsonMarshaller;
 import tech.skworks.tachyon.plugin.core.metric.scraper.TachyonMetrics;
 import tech.skworks.tachyon.plugin.core.grpc.AbstractGrpcService;
 import tech.skworks.tachyon.plugin.spigot.config.TachyonConfig;
-import tech.skworks.tachyon.service.contracts.audit.*;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.core.grpc.BackendStubProvider;
@@ -22,15 +28,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Class AuditManager
  *
  * @author  Jimmy (vSKAH) - 06/04/2026
- * @version 1.0
+ * @version 2.0
  * @since 1.0.0-SNAPSHOT
  */
 public class GrpcAuditService extends AbstractGrpcService implements AuditService {
 
     private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("AuditManager");
-    private final String serverName;
 
-    private final BlockingQueue<AuditLogEntry> buffer;
+    private final String serverName;
+    private final BlockingQueue<AuditEntry> buffer;
     private final ScheduledExecutorService scheduler;
     private final ExecutorService executor;
 
@@ -44,74 +50,123 @@ public class GrpcAuditService extends AbstractGrpcService implements AuditServic
 
         this.serverName = config.serverName();
         this.buffer = new LinkedBlockingQueue<>(auditConfig.bufferSize());
+        this.drainAmountPerCycle = auditConfig.bufferDrainPerCycles();
+
 
         this.scheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("tachyon-audit-scheduler").factory());
-        this.scheduler.scheduleAtFixedRate(this::triggerFlush, auditConfig.bufferFlushDelay(), auditConfig.bufferFlushDelay(), TimeUnit.SECONDS);
+        this.scheduler.scheduleAtFixedRate(() -> triggerFlush(false), auditConfig.bufferFlushDelay(), auditConfig.bufferFlushDelay(), TimeUnit.SECONDS);
 
         this.executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("tachyon-audit-flush-vthread-", 1).factory());
-
-        this.drainAmountPerCycle = auditConfig.bufferDrainPerCycles();
         LOGGER.info("AuditManager initialized for server '{}' — buffer capacity: {}, flush interval: {}s.", serverName, auditConfig.bufferSize(), auditConfig.bufferFlushDelay());
     }
 
-
     @Override
-    public void log(@NotNull final String uuid, @NotNull final String action, @NotNull final String details) {
-        final AuditLogEntry entry = AuditLogEntry.newBuilder().setUuid(uuid).setModule(serverName).setAction(action).setDetails(details).setTimestampMs(System.currentTimeMillis()).build();
+    public void log(@NotNull AuditEntry auditEntry) {
+        if (auditEntry.auditLevel() == AuditLevel.CRITICAL) {
+            logDirect(auditEntry);
+            return;
+        }
 
-        boolean accepted = buffer.offer(entry);
+        boolean accepted = buffer.offer(auditEntry);
         if (!accepted) {
-            LOGGER.error("Audit buffer full — entry dropped. Triggering emergency flush. ");
-            LOGGER.error("Action: '{}' for uuid: {}", action, uuid);
-            triggerFlush();
+            LOGGER.error("Audit buffer full — entry dropped. Action '{}' for uuid '{}'.", auditEntry.action(), auditEntry.playerId());
+            triggerFlush(false);
         }
     }
 
-    private void triggerFlush() {
-        if (buffer.isEmpty() || !isFlushing.compareAndSet(false, true)) {
-            return;
-        }
+    private RawBsonDocument toRawBson(AuditEntry auditEntry) {
+        return BsonMarshaller.toRawBsonDocument(new BsonDocument()
+                .append("uuid", new BsonString(auditEntry.playerId()))
+                .append("module", new BsonString(auditEntry.module()))
+                .append("action", new BsonString(auditEntry.action()))
+                .append("description", new BsonString(auditEntry.description()))
+                .append("level", new BsonString(auditEntry.auditLevel().name()))
+                .append("timestamp", new BsonInt64(auditEntry.timestamp())));
+    }
 
-        List<AuditLogEntry> batch = new ArrayList<>();
-        buffer.drainTo(batch, drainAmountPerCycle);
+    private CompletableFuture<Void> logBatch(final List<RawBsonDocument> batch) {
+        final var payload = BsonMarshaller.toRawBsonDocument(new BsonDocument("values", new BsonArray(batch)));
 
-        if (batch.isEmpty()) {
-            isFlushing.set(false);
-            return;
-        }
+        return asyncRun(executor, LOGGER, "logBatch", () -> {
+            ClientCalls.blockingUnaryCall(
+                    backendStubProvider.getChannel(),
+                    AuditContract.LOG_ENTRY_BATCH_METHOD,
+                    CallOptions.DEFAULT.withDeadlineAfter(5, TimeUnit.SECONDS),
+                    payload
+            );
+        });
 
-        asyncRun(executor, LOGGER, "flushAuditLogs",
-                () -> backendStubProvider.getAuditStub(3).logEventBatch(LogEventBatchRequest.newBuilder().addAllEntries(batch).build()))
-                .whenComplete((res, ex) -> {
-            if (ex != null) {
-                LOGGER.warn("gRPC call to audit service failed — requeueing {} entries.", batch.size());
-                requeue(batch);
+    }
+
+    private CompletableFuture<Void> logDirect(AuditEntry auditEntry) {
+        final var payload = toRawBson(auditEntry);
+
+        return asyncRun(executor, LOGGER, "logDirect", () -> {
+            ClientCalls.blockingUnaryCall(
+                    backendStubProvider.getChannel(),
+                    AuditContract.DIRECT_LOG_ENTRY_METHOD,
+                    CallOptions.DEFAULT.withDeadlineAfter(3, TimeUnit.SECONDS),
+                    payload
+            );
+
+        }).exceptionally((_) -> {
+            LOGGER.error("Direct audit failed for '{}' (uuid: {}) - falling back to memory buffer.", auditEntry.action(), auditEntry.playerId());
+            if (!buffer.offer(auditEntry)) {
+                LOGGER.error("Emergency buffer full: direct audit entry dropped for uuid: '{}'", auditEntry.playerId());
             }
-
-            isFlushing.set(false);
-
-            if (ex == null && !buffer.isEmpty()) {
-                triggerFlush();
-            }
+            return null;
         });
     }
 
-    private void requeue(List<AuditLogEntry> batch) {
-        int requeued = 0;
-        int dropped  = 0;
-
-        for (AuditLogEntry entry : batch) {
-            if (buffer.offer(entry)) requeued++;
-            else dropped++;
+    private CompletableFuture<Void> triggerFlush(boolean drainAll) {
+        if (buffer.isEmpty() || !isFlushing.compareAndSet(false, true)) {
+            return CompletableFuture.completedFuture(null);
         }
 
-        if (dropped > 0) LOGGER.error("{} audit entries permanently dropped (buffer full).", dropped);
-        if (requeued > 0) LOGGER.warn("{} audit entries re-queued.", requeued);
+        final int limit = drainAll ? buffer.size() : drainAmountPerCycle;
+        final var batch = new ArrayList<AuditEntry>(limit);
+        buffer.drainTo(batch, limit);
+
+        if (batch.isEmpty()) {
+            isFlushing.set(false);
+            return CompletableFuture.completedFuture(null);
+        }
+
+        final var serialized = batch.stream().map(this::toRawBson).toList();
+
+        return logBatch(serialized)
+                .exceptionally((_) -> {
+                    LOGGER.warn("gRPC call to audit service failed — requeueing {} entries.", batch.size());
+                    requeue(batch);
+                    return null;
+                })
+                .whenComplete((_, _) -> isFlushing.set(false));
+    }
+
+    private void requeue(List<AuditEntry> batch) {
+        int dropped = 0;
+
+        for (AuditEntry entry : batch) {
+            if (!buffer.offer(entry)) {
+                dropped++;
+            }
+        }
+
+        if (dropped > 0) {
+            LOGGER.error("{} audit entries permanently dropped (buffer full).", dropped);
+        }
+
+        LOGGER.warn("{} audit entries successfully requeued.", batch.size() - dropped);
     }
 
     @Override
     protected <T> void handleGrpcExceptions(@NotNull final String actionName, @NotNull final StatusRuntimeException ex, final CompletableFuture<T> future) {
-        LOGGER.error("gRPC Status Exception during '{}': {} (Code: {})", actionName, ex.getMessage(), ex.getStatus().getCode());
+        switch (ex.getStatus().getCode()) {
+            case UNAVAILABLE, DEADLINE_EXCEEDED ->
+                    LOGGER.warn("Unable to reach back-end during '{}': {} (Code: {}). Actions will be retried.", actionName, ex.getMessage(), ex.getStatus().getCode());
+            default ->
+                    LOGGER.error("gRPC Status Exception during '{}': {} (Code: {})", actionName, ex.getMessage(), ex.getStatus().getCode());
+        }
         if (future != null && !future.isDone()) {
             future.completeExceptionally(ex);
         }
@@ -120,35 +175,23 @@ public class GrpcAuditService extends AbstractGrpcService implements AuditServic
     @Override
     public void shutdown() {
         LOGGER.info("AuditManager shutdown initiated — draining remaining buffer...");
-
         scheduler.shutdown();
 
-        int remaining = buffer.size();
-        if (remaining > 0) {
-            LOGGER.info("Flushing {} remaining audit entries synchronously...", remaining);
-            while (!buffer.isEmpty()) {
-                List<AuditLogEntry> batch = new ArrayList<>();
-                buffer.drainTo(batch, drainAmountPerCycle);
-                if (batch.isEmpty()) break;
-
-                try {
-                    backendStubProvider.getAuditStub(3).logEventBatch(LogEventBatchRequest.newBuilder().addAllEntries(batch).build());
-                } catch (Exception e) {
-                    LOGGER.error(e, "Final audit flush failed. Dropping {} entries.", batch.size());
-                    break;
-                }
+        if (!buffer.isEmpty()) {
+            try {
+                LOGGER.info("Flushing {} remaining audit entries asynchronously...", buffer.size());
+                triggerFlush(true).get(6, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                LOGGER.error("gRPC Status Exception during flushing audit entries.", e);
             }
+
         }
 
         executor.shutdown();
 
         try {
-            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                scheduler.shutdownNow();
-            }
-            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-            }
+            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) scheduler.shutdownNow();
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) executor.shutdownNow();
             LOGGER.info("AuditManager shutdown complete. Buffer remaining: {} entries.", buffer.size());
         } catch (InterruptedException e) {
             scheduler.shutdownNow();
@@ -156,5 +199,7 @@ public class GrpcAuditService extends AbstractGrpcService implements AuditServic
             Thread.currentThread().interrupt();
             LOGGER.error(e, "AuditManager shutdown interrupted — some entries may be lost.");
         }
+
     }
+
 }

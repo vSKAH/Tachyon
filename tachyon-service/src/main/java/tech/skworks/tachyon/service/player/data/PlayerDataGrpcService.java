@@ -27,8 +27,9 @@ import org.bson.codecs.EncoderContext;
 import org.bson.io.BasicOutputBuffer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import tech.skworks.tachyon.common.contract.DataContract;
+import tech.skworks.tachyon.common.marshaller.BsonMarshaller;
 import tech.skworks.tachyon.service.infra.RedisKeys;
-import tech.skworks.tachyon.service.infra.grpc.BsonMarshaller;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
 import java.nio.ByteBuffer;
@@ -62,22 +63,6 @@ public class PlayerDataGrpcService implements BindableService {
     private final ReactiveStreamCommands<String, String, byte[]> redisStream;
     private final ReactiveKeyCommands<String> redisKey;
 
-    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> PULL_PROFILE_METHOD =
-            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
-                    .setType(MethodDescriptor.MethodType.UNARY)
-                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.PlayerDataService", "PullProfile"))
-                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
-                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
-                    .build();
-
-    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> PUSH_PROFILE_METHOD =
-            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
-                    .setType(MethodDescriptor.MethodType.UNARY)
-                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.PlayerDataService", "PushProfile"))
-                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
-                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
-                    .build();
-
     public PlayerDataGrpcService(ReactiveRedisDataSource redisDS) {
         this.redisString = redisDS.value(String.class);
         this.redisBytes = redisDS.value(byte[].class);
@@ -92,8 +77,8 @@ public class PlayerDataGrpcService implements BindableService {
 
     @Override
     public ServerServiceDefinition bindService() {
-        return ServerServiceDefinition.builder("tech.skworks.tachyon.PlayerDataService")
-                .addMethod(PULL_PROFILE_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+        return ServerServiceDefinition.builder(DataContract.SERVICE_NAME)
+                .addMethod(DataContract.PULL_PROFILE_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
                     pullProfile(request).subscribe().with(
                             response -> {
                                 responseObserver.onNext(response);
@@ -102,7 +87,7 @@ public class PlayerDataGrpcService implements BindableService {
                             responseObserver::onError
                     );
                 }))
-                .addMethod(PUSH_PROFILE_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                .addMethod(DataContract.PUSH_PROFILE_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
                     pushProfile(request).subscribe().with(
                             response -> {
                                 responseObserver.onNext(response);
@@ -171,7 +156,7 @@ public class PlayerDataGrpcService implements BindableService {
         return redisString.setex(dirtyKey, RedisKeys.DIRTY_TTL_SECONDS, "1")
                 .chain(() -> redisStream.xadd(config.streamKey(), STREAM_ARGS, Map.of("save_profile_payload", payloadBytes)))
                 .invoke(id -> log.infof("[PlayerDataGrpcService] saveProfile() enqueued for %s (stream message id: %s).", uuid, id))
-                .replaceWith(emptyBsonResponse())
+                .replaceWith(BsonMarshaller.EMPTY)
                 .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] saveProfile() failed to enqueue for %s — releasing dirty key.", uuid))
                 .onFailure().call(() -> redisKey.del(dirtyKey));
     }
@@ -210,9 +195,5 @@ public class PlayerDataGrpcService implements BindableService {
             new BsonDocumentCodec().encode(writer, document, EncoderContext.builder().build());
         }
         return buffer.toByteArray();
-    }
-
-    private static RawBsonDocument emptyBsonResponse() {
-        return new RawBsonDocument(bsonDocumentToBytes(new BsonDocument()));
     }
 }

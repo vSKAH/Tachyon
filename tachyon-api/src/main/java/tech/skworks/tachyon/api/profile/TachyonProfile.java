@@ -1,9 +1,9 @@
 package tech.skworks.tachyon.api.profile;
 
+import org.bson.BsonDocument;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.component.ComponentNamespace;
-import tech.skworks.tachyon.libs.org.bson.BsonDocument;
 
 import java.util.Collection;
 import java.util.List;

@@ -22,9 +22,10 @@ import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.service.infra.grpc.BsonMarshaller;
+import tech.skworks.tachyon.common.contract.SnapshotContract;
+import tech.skworks.tachyon.common.marshaller.BsonMarshaller;
+import tech.skworks.tachyon.service.audit.AuditGrpcService;
 
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
@@ -68,50 +69,10 @@ public class SnapshotGrpcService implements BindableService {
         this.logger.debug("SnapshotGrpcService collections initialized.");
     }
 
-    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> TAKE_DATABASE_SNAPSHOT =
-            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
-                    .setType(MethodDescriptor.MethodType.UNARY)
-                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.SnapshotGrpcService", "TakeDatabaseSnapshot"))
-                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
-                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
-                    .build();
-
-    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> TAKE_COMPONENT_SNAPSHOT =
-            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
-                    .setType(MethodDescriptor.MethodType.UNARY)
-                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.SnapshotGrpcService", "TakeComponentSnapshot"))
-                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
-                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
-                    .build();
-
-    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> TOGGLE_SNAPSHOT_LOCK =
-            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
-                    .setType(MethodDescriptor.MethodType.UNARY)
-                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.SnapshotGrpcService", "ToggleSnapshotLock"))
-                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
-                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
-                    .build();
-
-    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> LIST_SNAPSHOT =
-            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
-                    .setType(MethodDescriptor.MethodType.UNARY)
-                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.SnapshotGrpcService", "ListSnapshot"))
-                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
-                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
-                    .build();
-
-    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> DECODE_SNAPSHOT =
-            MethodDescriptor.<RawBsonDocument, RawBsonDocument>newBuilder()
-                    .setType(MethodDescriptor.MethodType.UNARY)
-                    .setFullMethodName(MethodDescriptor.generateFullMethodName("tech.skworks.tachyon.SnapshotGrpcService", "DecodeSnapshot"))
-                    .setRequestMarshaller(BsonMarshaller.INSTANCE)
-                    .setResponseMarshaller(BsonMarshaller.INSTANCE)
-                    .build();
-
     @Override
     public ServerServiceDefinition bindService() {
-        return ServerServiceDefinition.builder("tech.skworks.tachyon.SnapshotGrpcService")
-                .addMethod(TAKE_DATABASE_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+        return ServerServiceDefinition.builder(SnapshotContract.SERVICE_NAME)
+                .addMethod(SnapshotContract.TAKE_DATABASE_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
                     takeDatabaseSnapshot(request).subscribe().with(
                             response -> {
                                 responseObserver.onNext(response);
@@ -120,7 +81,7 @@ public class SnapshotGrpcService implements BindableService {
                             responseObserver::onError
                     );
                 }))
-                .addMethod(TAKE_COMPONENT_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                .addMethod(SnapshotContract.TAKE_COMPONENT_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
                     takeComponentSnapshot(request).subscribe().with(
                             response -> {
                                 responseObserver.onNext(response);
@@ -129,7 +90,7 @@ public class SnapshotGrpcService implements BindableService {
                             responseObserver::onError
                     );
                 }))
-                .addMethod(TOGGLE_SNAPSHOT_LOCK, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                .addMethod(SnapshotContract.TOGGLE_SNAPSHOT_LOCK, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
                     toggleLockSnapshot(request).subscribe().with(
                             response -> {
                                 responseObserver.onNext(response);
@@ -138,7 +99,7 @@ public class SnapshotGrpcService implements BindableService {
                             responseObserver::onError
                     );
                 }))
-                .addMethod(LIST_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                .addMethod(SnapshotContract.LIST_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
                     listSnapshots(request).subscribe().with(
                             response -> {
                                 responseObserver.onNext(response);
@@ -147,7 +108,7 @@ public class SnapshotGrpcService implements BindableService {
                             responseObserver::onError
                     );
                 }))
-                .addMethod(DECODE_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                .addMethod(SnapshotContract.DECODE_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
                     decodeSnapshot(request).subscribe().with(
                             response -> {
                                 responseObserver.onNext(response);
@@ -240,7 +201,7 @@ public class SnapshotGrpcService implements BindableService {
         payload.put("timestamp", String.valueOf(System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8));
 
         return redisStream.xadd(snapshotConfig.streamKey(), STREAM_ARGS, payload)
-                .replaceWith(emptyBsonResponse())
+                .replaceWith(BsonMarshaller.EMPTY)
                 .onFailure().invoke(e -> logger.error("Redis Stream Error", e))
                 .onFailure().transform(e -> Status.UNAVAILABLE.withDescription("The snapshot buffer (Redis) is currently unavailable.").withCause(e).asRuntimeException());
     }
@@ -337,13 +298,7 @@ public class SnapshotGrpcService implements BindableService {
     }
 
     private static byte[] toByteArray(RawBsonDocument doc) {
-        ByteBuffer nio = doc.getByteBuffer().asNIO().duplicate();
-        byte[] bytes = new byte[nio.remaining()];
-        nio.get(bytes);
-        return bytes;
+        return AuditGrpcService.toByteArray(doc);
     }
 
-    private static RawBsonDocument emptyBsonResponse() {
-        return BsonMarshaller.toRawBsonDocument(new BsonDocument());
-    }
 }

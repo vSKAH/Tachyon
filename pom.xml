@@ -9,11 +9,12 @@
     <version>2.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <modules>
-        <module>tachyon-service</module>
-        <module>tachyon-libs</module>
+        <module>tachyon-common</module>
         <module>tachyon-api</module>
+        <module>tachyon-service</module>
         <module>tachyon-minecraft-plugin</module>
         <module>tachyon-minecraft-example</module>
+        <module>tachyon-minecraft-benchmark</module>
     </modules>
 
     <properties>
@@ -35,5 +36,19 @@
             <url>https://reposilite.skworks.tech/snapshots</url>
         </snapshotRepository>
     </distributionManagement>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>versions-maven-plugin</artifactId>
+                <version>2.18.0</version>
+                <configuration>
+                    <generateBackupPoms>false</generateBackupPoms>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
 
 </project>

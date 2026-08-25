@@ -1,10 +1,7 @@
 package tech.skworks.tachyon.plugin.core.grpc;
 
-import tech.skworks.tachyon.service.contracts.audit.AuditServiceGrpc;
-import tech.skworks.tachyon.service.contracts.player.session.PlayerSessionServiceGrpc;
-import tech.skworks.tachyon.service.contracts.system.SystemGrpc;
-import tech.skworks.tachyon.libs.io.grpc.ManagedChannel;
-import tech.skworks.tachyon.libs.io.grpc.ManagedChannelBuilder;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 
@@ -27,29 +24,13 @@ public class BackendStubProvider {
     private final ExecutorService grpcVirtualExecutor;
 
     private final ManagedChannel channel;
-    private final PlayerSessionServiceGrpc.PlayerSessionServiceBlockingStub playerSessionStub;
-    private final AuditServiceGrpc.AuditServiceBlockingStub auditStub;
-    private final SystemGrpc.SystemBlockingStub systemStub;
 
     public BackendStubProvider(String host, int port) {
         this.grpcVirtualExecutor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("tachyon-grpc-", 1).factory());
         LOGGER.info("Initializing gRPC client towards {}:{} (Virtual Threads)", host, port);
-        this.channel = ManagedChannelBuilder.forAddress(host, port).useTransportSecurity().executor(grpcVirtualExecutor).keepAliveTime(30, TimeUnit.SECONDS).keepAliveTimeout(5, TimeUnit.SECONDS).keepAliveWithoutCalls(true).maxInboundMessageSize(32 * 1024 * 1024).enableRetry().maxRetryAttempts(3).defaultLoadBalancingPolicy("round_robin").build();
-        this.playerSessionStub = PlayerSessionServiceGrpc.newBlockingStub(channel);
-        this.auditStub = AuditServiceGrpc.newBlockingStub(channel);
-        this.systemStub = SystemGrpc.newBlockingStub(channel);
-    }
-
-    public PlayerSessionServiceGrpc.PlayerSessionServiceBlockingStub getPlayerSessionStub(int deadline) {
-        return playerSessionStub.withDeadlineAfter(deadline, TimeUnit.SECONDS);
-    }
-
-    public AuditServiceGrpc.AuditServiceBlockingStub getAuditStub(int deadline) {
-        return auditStub.withDeadlineAfter(deadline, TimeUnit.SECONDS);
-    }
-
-    public SystemGrpc.SystemBlockingStub getSystemStub(int deadline) {
-        return systemStub.withDeadlineAfter(deadline, TimeUnit.SECONDS);
+        this.channel = ManagedChannelBuilder.forAddress(host, port).useTransportSecurity().executor(grpcVirtualExecutor)
+                .keepAliveTime(30, TimeUnit.SECONDS).keepAliveTimeout(5, TimeUnit.SECONDS).keepAliveWithoutCalls(true)
+                .maxInboundMessageSize(32 * 1024 * 1024).enableRetry().maxRetryAttempts(3).defaultLoadBalancingPolicy("round_robin").build();
     }
 
     public ManagedChannel getChannel() {
@@ -57,12 +38,12 @@ public class BackendStubProvider {
     }
 
     public void shutdown() {
-        LOGGER.info("The shutdown has been started...");
+        LOGGER.info("Shutdown of gRPC Client Manager has been started...");
         channel.shutdown();
 
         try {
-            if (!channel.awaitTermination(10, TimeUnit.SECONDS)) {
-                LOGGER.error("Channel shutdown timed out after 10s. Forcing shutdownNow()...");
+            if (!channel.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("Channel shutdown timed out after 5s - Forcing shutdownNow()...");
                 channel.shutdownNow();
             }
         } catch (InterruptedException e) {
@@ -73,8 +54,8 @@ public class BackendStubProvider {
 
         grpcVirtualExecutor.shutdown();
         try {
-            if (!grpcVirtualExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
-                LOGGER.error("GrpcVirtualExecutor shutdown timed out after 10s. Forcing shutdownNow()...");
+            if (!grpcVirtualExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("GrpcVirtualExecutor shutdown timed out after 5s. -Forcing shutdownNow()...");
                 grpcVirtualExecutor.shutdownNow();
             }
         } catch (InterruptedException e) {

@@ -8,6 +8,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.TachyonAPI;
+import tech.skworks.tachyon.api.audit.AuditService;
 import tech.skworks.tachyon.api.event.EventBus;
 import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
@@ -149,6 +150,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
             for (TachyonProfile profile : profiles) {
                 CompletableFuture<Void> safeSave = getPlayerDataService().pushProfile(profile)
+                        //TODO unlocking profiles
                         .exceptionally(ex -> {
                             logger.error("saveProfile() failed at shutdown for {}: {}", profile.getUuid(), ex.getMessage());
                             return null;

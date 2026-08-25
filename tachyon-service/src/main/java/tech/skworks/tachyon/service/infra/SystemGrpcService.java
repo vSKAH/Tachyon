@@ -1,12 +1,16 @@
 package tech.skworks.tachyon.service.infra;
 
+import io.grpc.BindableService;
+import io.grpc.ServerServiceDefinition;
+import io.grpc.stub.ServerCalls;
 import io.quarkus.grpc.GrpcService;
 import io.smallrye.common.annotation.NonBlocking;
-import io.smallrye.mutiny.Uni;
+import org.bson.BsonDocument;
+import org.bson.BsonInt64;
+import org.bson.BsonString;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import tech.skworks.tachyon.service.contracts.system.MutinySystemGrpc;
-import tech.skworks.tachyon.service.contracts.system.PingRequest;
-import tech.skworks.tachyon.service.contracts.system.PingResponse;
+import tech.skworks.tachyon.common.contract.SystemContract;
+import tech.skworks.tachyon.common.marshaller.BsonMarshaller;
 
 /**
  * Project Tachyon
@@ -18,15 +22,23 @@ import tech.skworks.tachyon.service.contracts.system.PingResponse;
  */
 @GrpcService
 @NonBlocking
-public class SystemGrpcService extends MutinySystemGrpc.SystemImplBase {
+public class SystemGrpcService implements BindableService {
 
     @ConfigProperty(name = "quarkus.application.name")
     String applicationName;
 
-    @Override
-    public Uni<PingResponse> ping(PingRequest request) {
-        long serverTime = System.currentTimeMillis();
-        return Uni.createFrom().item(PingResponse.newBuilder().setServerTime(serverTime).setTachyonServerName(applicationName).build());
-    }
 
+    @Override
+    public ServerServiceDefinition bindService() {
+        return ServerServiceDefinition.builder(SystemContract.SERVICE_NAME)
+                .addMethod(SystemContract.PING_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                    var response = new BsonDocument()
+                            .append("server_time", new BsonInt64(System.currentTimeMillis()))
+                            .append("tachyon_server_name", new BsonString(applicationName));
+
+                    responseObserver.onNext(BsonMarshaller.toRawBsonDocument(response));
+                    responseObserver.onCompleted();
+                }))
+                .build();
+    }
 }

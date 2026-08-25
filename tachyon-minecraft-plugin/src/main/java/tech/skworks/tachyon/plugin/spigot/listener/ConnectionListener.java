@@ -1,5 +1,6 @@
 package tech.skworks.tachyon.plugin.spigot.listener;
 
+import org.bson.BsonDocument;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -7,10 +8,10 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import tech.skworks.tachyon.api.audit.AuditEntry;
 import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
-import tech.skworks.tachyon.libs.org.bson.BsonDocument;
 import tech.skworks.tachyon.plugin.core.metric.scraper.VanillaMetrics;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
@@ -53,7 +54,7 @@ public class ConnectionListener implements Listener {
 
             plugin.getTachyonProfileRegistry().buildProfile(playerResponse, uuid);
             if (plugin.getPluginConfig().auditConfig().enableLoginLogs())
-                plugin.getAuditService().log(uuid.toString(), "JOIN", "Player joined server");
+                plugin.getAuditService().log(AuditEntry.of(uuid, "CONNECTION", "JOIN", "Player joined server"));
             LOGGER.info("Pre-login successful for {} ({}).", event.getName(), uuid);
 
         } catch (Exception e) {
@@ -79,7 +80,7 @@ public class ConnectionListener implements Listener {
                 LOGGER.warn("Login denied for {} after profile was loaded (result: {}) — releasing state and unloading profile.", uuid, event.getResult());
 
                 if (plugin.getPluginConfig().auditConfig().enableLoginLogs())
-                    plugin.getAuditService().log(uuid.toString(), "KICKED", "Login denied: " + event.getKickMessage());
+                    plugin.getAuditService().log(AuditEntry.of(uuid, "CONNECTION", "KICKED", "Login denied: " + event.getKickMessage()));
 
                 profilesRegistry.unloadProfile(uuid, "LOGIN_DENIED");
                 plugin.getPlayerSessionService().unlockPlayerProfile(uuid, name);
@@ -97,7 +98,7 @@ public class ConnectionListener implements Listener {
         final TachyonProfileRegistry profilesRegistry = plugin.getTachyonProfileRegistry();
 
         if (plugin.getPluginConfig().auditConfig().enableLogoutLogs())
-            plugin.getAuditService().log(uuid.toString(), "QUIT", "Player left server");
+            plugin.getAuditService().log(AuditEntry.of(uuid, "CONNECTION", "QUIT", "Player left server"));
 
         TachyonProfile profile = profilesRegistry.getProfile(uuid);
 

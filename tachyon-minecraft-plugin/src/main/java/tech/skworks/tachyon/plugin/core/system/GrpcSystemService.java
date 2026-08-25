@@ -1,16 +1,21 @@
 package tech.skworks.tachyon.plugin.core.system;
 
+import io.grpc.CallOptions;
+import io.grpc.StatusRuntimeException;
+import io.grpc.stub.ClientCalls;
+import org.bson.BsonDocument;
+import org.bson.BsonInt64;
+import org.bson.BsonString;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.services.SystemService;
-import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
+import tech.skworks.tachyon.common.contract.SystemContract;
+import tech.skworks.tachyon.common.marshaller.BsonMarshaller;
 import tech.skworks.tachyon.plugin.core.grpc.BackendStubProvider;
 import tech.skworks.tachyon.plugin.core.metric.scraper.TachyonMetrics;
 import tech.skworks.tachyon.plugin.core.grpc.AbstractGrpcService;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
-import tech.skworks.tachyon.service.contracts.system.PingRequest;
-import tech.skworks.tachyon.service.contracts.system.PingResponse;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -42,37 +47,37 @@ public class GrpcSystemService extends AbstractGrpcService implements SystemServ
 
     @Override
     public CompletableFuture<Boolean> pingBackend() {
-
         if (!pingInProgress.compareAndSet(false, true)) {
-            LOGGER.warn("A ping is already in progress. Skipping this request.");
             return CompletableFuture.completedFuture(false);
         }
 
-        return asyncCall(
-                executor,
-                LOGGER,
-                "pingBackend",
-                () -> {
-                    long send = System.currentTimeMillis();
+        final var sendTimestamp = System.currentTimeMillis();
+        final var payload = BsonMarshaller.toRawBsonDocument(new BsonDocument().append("client_time", new BsonInt64(sendTimestamp)).append("server_name", new BsonString(serverName)));
 
-                    PingResponse response = backendStubProvider.getSystemStub(4).ping(PingRequest.newBuilder().setClientTime(send).setSpigotServerName(serverName).build());
-                    if (response != null) {
-                        long time = response.getServerTime() - send;
-                        LOGGER.info("The ping took {}ms to respond ({})", time, response.getTachyonServerName());
-                        return true;
-                    }
-                    return false;
-                }
-        ).whenComplete((result, throwable) -> pingInProgress.set(false))
+        return asyncCall(executor, LOGGER, "pingBackend", () -> {
+
+            var response = ClientCalls.blockingUnaryCall(backendStubProvider.getChannel(), SystemContract.PING_METHOD, CallOptions.DEFAULT.withDeadlineAfter(2, TimeUnit.SECONDS), payload);
+
+            String backendName = response.getString("tachyon_server_name").getValue();
+            LOGGER.info("Ping response in {}ms from {}", System.currentTimeMillis() - sendTimestamp, backendName);
+            return true;
+
+        }).whenComplete((_, _) -> pingInProgress.set(false))
                 .exceptionally(ex -> {
-                    LOGGER.warn("Ping failed or timed out: {}", ex.getMessage());
+                    LOGGER.warn("Ping to backend failed or timed out: {}", ex.getMessage());
                     return false;
                 });
     }
 
     @Override
     protected <T> void handleGrpcExceptions(@NotNull final String actionName, @NotNull final StatusRuntimeException ex, final CompletableFuture<T> future) {
-        LOGGER.error("gRPC Status Exception during '{}': {} (Code: {})", actionName, ex.getMessage(), ex.getStatus().getCode());
+
+        switch (ex.getStatus().getCode()) {
+            case UNAVAILABLE, DEADLINE_EXCEEDED ->
+                    LOGGER.warn("Unable to reach back-end for ping: {} (Code: {}). Actions will be retried.", ex.getMessage(), ex.getStatus().getCode());
+            default ->
+                    LOGGER.error("gRPC Status Exception during ping: {} (Code: {})", ex.getMessage(), ex.getStatus().getCode());
+        }
         if (future != null && !future.isDone()) {
             future.completeExceptionally(ex);
         }

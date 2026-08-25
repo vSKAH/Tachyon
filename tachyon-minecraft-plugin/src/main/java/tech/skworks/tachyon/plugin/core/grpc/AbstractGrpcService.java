@@ -1,14 +1,13 @@
 package tech.skworks.tachyon.plugin.core.grpc;
 
+import io.grpc.StatusRuntimeException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.core.metric.scraper.TachyonMetrics;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 
@@ -62,11 +61,12 @@ public abstract class AbstractGrpcService {
             } catch (Exception ex) {
                 logger.error(ex, "Client-side execution failure during action '{}'", actionName);
                 recordError(actionName + "_JVM", ex);
-                future.completeExceptionally(ex);
+                if (!future.isDone())
+                    future.completeExceptionally(ex);
             }
         });
 
-        return future.orTimeout(4, TimeUnit.SECONDS);
+        return future;
     }
 
     protected CompletableFuture<Void> asyncRun(Executor executor, TachyonLogger logger, String actionName, Runnable grpcCall) {

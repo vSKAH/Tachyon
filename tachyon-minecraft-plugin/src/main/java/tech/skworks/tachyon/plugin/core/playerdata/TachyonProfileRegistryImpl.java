@@ -1,5 +1,6 @@
 package tech.skworks.tachyon.plugin.core.playerdata;
 
+import org.bson.BsonDocument;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -10,7 +11,6 @@ import tech.skworks.tachyon.api.event.profile.ProfileLoadedEvent;
 import tech.skworks.tachyon.api.event.profile.ProfileUnloadedEvent;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
-import tech.skworks.tachyon.libs.org.bson.BsonDocument;
 import tech.skworks.tachyon.plugin.core.component.ComponentRegistryImpl;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;

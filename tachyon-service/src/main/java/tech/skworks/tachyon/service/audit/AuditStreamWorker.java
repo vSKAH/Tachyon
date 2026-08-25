@@ -11,11 +11,11 @@ import io.quarkus.scheduler.Scheduled;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.bson.BsonValue;
 import org.bson.Document;
+import org.bson.RawBsonDocument;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.service.contracts.audit.AuditLogEntry;
-import tech.skworks.tachyon.service.contracts.audit.LogEventBatchRequest;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -23,11 +23,12 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * Project Tachyon
- * Class AuditStreamWorker
+ * Worker that consumes audit logs from Redis Stream and batches them into MongoDB TimeSeries.
  *
- * @author  Jimmy (vSKAH) - 06/04/2026
- * @version 1.0
+ * <p><i>Project Tachyon</i></p>
+ *
+ * @author Jimmy (vSKAH) - 25/08/2026
+ * @version 2.0
  * @since 1.0.0-SNAPSHOT
  */
 @ApplicationScoped
@@ -46,7 +47,6 @@ class AuditStreamWorker {
     String dbName;
 
     private final StreamCommands<String, String, byte[]> redisStream;
-
     private MongoCollection<Document> auditCollection;
 
     public AuditStreamWorker(RedisDataSource redisDS) {
@@ -82,11 +82,23 @@ class AuditStreamWorker {
 
         for (StreamMessage<String, String, byte[]> msg : messages) {
             try {
-                LogEventBatchRequest batch = LogEventBatchRequest.parseFrom(msg.payload().get("payload"));
+                byte[] batchPayload = msg.payload().get("payload");
+                byte[] directPayload = msg.payload().get("direct_payload");
 
-                for (AuditLogEntry logItem : batch.getEntriesList()) {
-                    docsToInsert.add(new Document("uuid", logItem.getUuid()).append("module", logItem.getModule()).append("action", logItem.getAction()).append("details", logItem.getDetails()).append("timestamp", new Date(logItem.getTimestampMs())));
+                if (batchPayload != null) {
+                    RawBsonDocument raw = new RawBsonDocument(batchPayload);
+                    if (raw.containsKey("values") && raw.isArray("values")) {
+                        for (BsonValue val : raw.getArray("values")) {
+                            if (val.isDocument()) {
+                                docsToInsert.add(convertBsonToMongoDoc(val.asDocument()));
+                            }
+                        }
+                    }
+                } else if (directPayload != null) {
+                    RawBsonDocument raw = new RawBsonDocument(directPayload);
+                    docsToInsert.add(convertBsonToMongoDoc(raw));
                 }
+
                 parsedIds.add(msg.id());
             } catch (Exception e) {
                 log.errorf(e, "Failed to parse audit message %s — poison, dropping (ACK).", msg.id());
@@ -103,10 +115,31 @@ class AuditStreamWorker {
             } catch (Exception e) {
                 log.error("Audit insertMany failed — parsed messages left pending for retry.", e);
             }
+        } else {
+            idsToAck.addAll(parsedIds);
         }
 
         if (!idsToAck.isEmpty()) {
             redisStream.xack(config.streamKey(), config.streamGroupName(), idsToAck.toArray(new String[0]));
         }
+    }
+
+    private Document convertBsonToMongoDoc(org.bson.BsonDocument bson) {
+        String uuid = bson.containsKey("uuid") && bson.isString("uuid") ? bson.getString("uuid").getValue() : "GLOBAL";
+        String module = bson.containsKey("module") && bson.isString("module") ? bson.getString("module").getValue() : "";
+        String action = bson.containsKey("action") && bson.isString("action") ? bson.getString("action").getValue() : "";
+        String description = bson.containsKey("description") && bson.isString("description") ? bson.getString("description").getValue() : "";
+        String level = bson.containsKey("level") && bson.isString("level") ? bson.getString("level").getValue() : "NORMAL";
+
+        long timestampMs = bson.containsKey("timestamp") && bson.isInt64("timestamp")
+                ? bson.getInt64("timestamp").getValue()
+                : System.currentTimeMillis();
+
+        return new Document("uuid", uuid)
+                .append("module", module)
+                .append("action", action)
+                .append("description", description)
+                .append("level", level)
+                .append("timestamp", new Date(timestampMs));
     }
 }

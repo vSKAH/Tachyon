@@ -1,12 +1,12 @@
 package tech.skworks.tachyon.plugin.core.playerdata;
 
+import org.bson.BsonDocument;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.component.ComponentCodec;
 import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
-import tech.skworks.tachyon.libs.org.bson.BsonDocument;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 

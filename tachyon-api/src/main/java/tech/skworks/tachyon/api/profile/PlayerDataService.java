@@ -1,8 +1,8 @@
 package tech.skworks.tachyon.api.profile;
 
+import org.bson.BsonDocument;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import tech.skworks.tachyon.libs.org.bson.BsonDocument;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;

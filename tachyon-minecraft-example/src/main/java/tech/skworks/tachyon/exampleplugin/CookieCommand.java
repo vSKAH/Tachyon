@@ -5,6 +5,7 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import tech.skworks.tachyon.api.TachyonAPI;
+import tech.skworks.tachyon.api.audit.AuditEntry;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.exampleplugin.component.CookieComponent;
 
@@ -49,7 +50,7 @@ public class CookieCommand implements CommandExecutor {
             //Update the component
             profile.updateComponent(CookieComponent.class, (value) -> value.toBuilder().cookiesAmount(newCookiesAmount).build());
 
-            tachyon.getAuditService().log(playerId.toString(), "GAIN_COOKIES", "+1");
+            tachyon.getAuditService().log(AuditEntry.of(playerId, "COOKIE_MODULE", "GAIN_COOKIES", "+1"));
             player.sendMessage("§6+1 Cookie ! §e(Total : " + newCookiesAmount + ")");
             return true;
         }

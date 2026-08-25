@@ -2,11 +2,7 @@ package tech.skworks.tachyon.service.player.data;
 
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
-import com.mongodb.client.model.BulkWriteOptions;
-import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.UpdateOneModel;
-import com.mongodb.client.model.UpdateOptions;
-import com.mongodb.client.model.WriteModel;
+import com.mongodb.client.model.*;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.stream.ClaimedMessages;
@@ -19,18 +15,19 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.*;
+import org.bson.conversions.Bson;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import tech.skworks.tachyon.service.infra.RedisKeys;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
+
+import static tech.skworks.tachyon.service.player.data.PlayerDataGrpcService.toByteArray;
 
 /**
  * Project Tachyon
@@ -58,6 +55,7 @@ class PlayerDataStreamWorker {
     private final KeyCommands<String> redisKey;
 
     private MongoCollection<Document> playersCollection;
+    private MongoCollection<RawBsonDocument> rawPlayersCollection;
 
     public PlayerDataStreamWorker(RedisDataSource redisDS) {
         this.redisStream = redisDS.stream(String.class, String.class, byte[].class);
@@ -68,6 +66,7 @@ class PlayerDataStreamWorker {
     @PostConstruct
     void init() {
         this.playersCollection = mongo.getDatabase(dbName).getCollection(config.collection());
+        this.rawPlayersCollection = mongo.getDatabase(dbName).getCollection(config.collection(), RawBsonDocument.class);
         this.log.infof("[PlayerStreamWorker] Initialized with consumer ID '%s' on stream '%s'.", config.consumerId(), config.streamKey());
     }
 
@@ -184,23 +183,17 @@ class PlayerDataStreamWorker {
         return updateOperations;
     }
 
+    private static final Bson PROJECTION = Projections.fields(Projections.include("uuid", "components"), Projections.excludeId());
+
     private void updateCacheBatchAndUnlock(List<String> uuids) {
-        Set<String> uniqueUuids = new HashSet<>(uuids);
+        final var uniqueUuids = new HashSet<>(uuids);
+
         try {
-            MongoCollection<RawBsonDocument> rawCollection = mongo.getDatabase(dbName).getCollection(config.collection(), RawBsonDocument.class);
-            List<RawBsonDocument> docs = rawCollection.find(Filters.in("uuid", uniqueUuids)).into(new ArrayList<>());
+            List<RawBsonDocument> docs = rawPlayersCollection.find(Filters.in("uuid", uniqueUuids)).projection(PROJECTION).into(new ArrayList<>());
+
             for (RawBsonDocument updatedDoc : docs) {
                 String uuid = updatedDoc.getString("uuid").getValue();
-                if (uuid == null) continue;
-
-                BsonDocument components = updatedDoc.containsKey("components") && updatedDoc.isDocument("components")
-                        ? updatedDoc.getDocument("components")
-                        : new BsonDocument();
-
-                BsonDocument profileResponseDoc = new BsonDocument("uuid", new BsonString(uuid))
-                        .append("components", components);
-
-                byte[] cacheBytes = PlayerDataGrpcService.bsonDocumentToBytes(profileResponseDoc);
+                byte[] cacheBytes = toByteArray(updatedDoc);
                 redisBytes.setex(RedisKeys.cache(uuid), RedisKeys.CACHE_TTL_SECONDS, cacheBytes);
                 log.debugf("[PlayerStreamWorker] Cache updated for %s (%d bytes).", uuid, cacheBytes.length);
             }

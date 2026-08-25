@@ -1,6 +1,6 @@
 package tech.skworks.tachyon.api.component;
 
-import org.jspecify.annotations.NonNull;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Locale;
 import java.util.Objects;
@@ -77,7 +77,7 @@ public record ComponentNamespace(String pluginName, String componentName, String
     }
 
     @Override
-    public @NonNull String toString() {
+    public @NotNull String toString() {
         return fullNamespace;
     }
 }

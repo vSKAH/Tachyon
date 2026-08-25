@@ -1,19 +1,20 @@
 package tech.skworks.tachyon.plugin.core.playerdata;
 
+import io.grpc.CallOptions;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
+import io.grpc.stub.ClientCalls;
+import org.bson.BsonArray;
+import org.bson.BsonDocument;
+import org.bson.BsonString;
+import org.bson.RawBsonDocument;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
-import tech.skworks.tachyon.libs.io.grpc.CallOptions;
-import tech.skworks.tachyon.libs.io.grpc.Status;
-import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
-import tech.skworks.tachyon.libs.io.grpc.stub.ClientCalls;
-import tech.skworks.tachyon.libs.org.bson.BsonArray;
-import tech.skworks.tachyon.libs.org.bson.BsonDocument;
-import tech.skworks.tachyon.libs.org.bson.BsonString;
-import tech.skworks.tachyon.libs.org.bson.RawBsonDocument;
-import tech.skworks.tachyon.plugin.core.grpc.marshaller.BsonMarshaller;
+import tech.skworks.tachyon.common.contract.DataContract;
+import tech.skworks.tachyon.common.marshaller.BsonMarshaller;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.common.retry.RetryQueue;
 import tech.skworks.tachyon.plugin.core.grpc.AbstractGrpcService;
@@ -83,7 +84,7 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
                 try {
                     playerResponse = ClientCalls.blockingUnaryCall(
                             backendStubProvider.getChannel(),
-                            PlayerDataContract.PULL_PROFILE_METHOD,
+                            DataContract.PULL_PROFILE_METHOD,
                             CallOptions.DEFAULT.withDeadlineAfter(4, TimeUnit.SECONDS),
                             rawRequest
                     );
@@ -153,7 +154,7 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
 
                     ClientCalls.blockingUnaryCall(
                             backendStubProvider.getChannel(),
-                            PlayerDataContract.PUSH_PROFILE_METHOD,
+                            DataContract.PUSH_PROFILE_METHOD,
                             CallOptions.DEFAULT.withDeadlineAfter(4, TimeUnit.SECONDS),
                             rawRequest
                             );

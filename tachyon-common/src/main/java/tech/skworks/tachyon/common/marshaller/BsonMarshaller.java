@@ -1,16 +1,12 @@
-package tech.skworks.tachyon.plugin.core.grpc.marshaller;
+package tech.skworks.tachyon.common.marshaller;
 
-import io.grpc.Drainable;
-import io.grpc.KnownLength;
-import tech.skworks.tachyon.libs.io.grpc.MethodDescriptor;
-import tech.skworks.tachyon.libs.io.grpc.Status;
-import tech.skworks.tachyon.libs.io.grpc.StatusRuntimeException;
-import tech.skworks.tachyon.libs.org.bson.BsonBinaryWriter;
-import tech.skworks.tachyon.libs.org.bson.BsonDocument;
-import tech.skworks.tachyon.libs.org.bson.RawBsonDocument;
-import tech.skworks.tachyon.libs.org.bson.codecs.BsonDocumentCodec;
-import tech.skworks.tachyon.libs.org.bson.codecs.EncoderContext;
-import tech.skworks.tachyon.libs.org.bson.io.BasicOutputBuffer;
+import io.grpc.*;
+import org.bson.BsonBinaryWriter;
+import org.bson.BsonDocument;
+import org.bson.RawBsonDocument;
+import org.bson.codecs.BsonDocumentCodec;
+import org.bson.codecs.EncoderContext;
+import org.bson.io.BasicOutputBuffer;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -21,19 +17,19 @@ import java.nio.ByteBuffer;
 public class BsonMarshaller implements MethodDescriptor.Marshaller<RawBsonDocument> {
 
     public static final BsonMarshaller INSTANCE = new BsonMarshaller();
+    public static final RawBsonDocument EMPTY = toRawBsonDocument(new BsonDocument());
 
     @Override
     public InputStream stream(RawBsonDocument value) {
         ByteBuffer nio = value.getByteBuffer().asNIO().duplicate();
 
-        byte[] bytes;
-        if (nio.hasArray() && nio.arrayOffset() == 0 && nio.position() == 0 && nio.remaining() == nio.array().length) {
-            bytes = nio.array();
-        } else {
-            bytes = new byte[nio.remaining()];
-            nio.get(bytes);
+        if (nio.hasArray()) {
+            return new BsonFastStream(nio.array(), nio.arrayOffset() + nio.position(), nio.remaining());
         }
-        return new BsonFastStream(bytes);
+
+        byte[] bytes = new byte[nio.remaining()];
+        nio.get(bytes);
+        return new BsonFastStream(bytes, 0, bytes.length);
     }
 
     @Override
@@ -64,6 +60,10 @@ public class BsonMarshaller implements MethodDescriptor.Marshaller<RawBsonDocume
 
         public RawBsonDocument toRawBsonDocument() {
             return new RawBsonDocument(this.buf, this.pos, this.count - this.pos);
+        }
+
+        public BsonFastStream(byte[] buf, int offset, int length) {
+            super(buf, offset, length);
         }
 
         @Override

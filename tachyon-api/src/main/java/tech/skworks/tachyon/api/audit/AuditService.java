@@ -1,4 +1,4 @@
-package tech.skworks.tachyon.api.services;
+package tech.skworks.tachyon.api.audit;
 
 import org.jetbrains.annotations.NotNull;
 
@@ -26,11 +26,7 @@ public interface AuditService {
      * handle the asynchronous dispatching of the log to prevent any blocking
      * on the main server thread.
      *
-     * @param uuid    The unique identifier (UUID) of the player associated with this event.
-     * @param action  A clear, categorizable identifier for the event
-     * (e.g., {@code "TRADE_ACCEPT"}, {@code "ITEM_DROP"}, {@code "FLAG_TRIGGERED"}).
-     * @param details Additional contextual information about the event.
      */
-    void log(@NotNull final String uuid, @NotNull final String action, @NotNull final String details);
+    void log(@NotNull AuditEntry auditEntry);
 
 }

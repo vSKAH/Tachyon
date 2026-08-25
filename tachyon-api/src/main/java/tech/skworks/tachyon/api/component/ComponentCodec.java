@@ -1,6 +1,7 @@
 package tech.skworks.tachyon.api.component;
 
-import tech.skworks.tachyon.libs.org.bson.BsonDocument;
+
+import org.bson.BsonDocument;
 
 /**
  * Short class explaination

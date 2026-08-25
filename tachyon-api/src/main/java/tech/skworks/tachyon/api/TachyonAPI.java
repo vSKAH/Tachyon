@@ -1,5 +1,6 @@
 package tech.skworks.tachyon.api;
 
+import tech.skworks.tachyon.api.audit.AuditService;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.api.event.EventBus;
 import tech.skworks.tachyon.api.profile.PlayerDataService;

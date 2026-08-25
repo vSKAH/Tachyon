@@ -1,14 +1,14 @@
 package tech.skworks.tachyon.exampleplugin.component;
 
 import lombok.Builder;
+import org.bson.BsonDocument;
+import org.bson.BsonInt64;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import tech.skworks.tachyon.api.component.ComponentCodec;
 import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.component.ComponentPreviewHandler;
-import tech.skworks.tachyon.libs.org.bson.BsonDocument;
-import tech.skworks.tachyon.libs.org.bson.BsonInt64;
 
 @Builder(toBuilder = true)
 public record CookieComponent(long cookiesAmount) {
