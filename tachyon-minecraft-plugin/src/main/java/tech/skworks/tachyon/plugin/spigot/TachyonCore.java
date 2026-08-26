@@ -1,5 +1,7 @@
 package tech.skworks.tachyon.plugin.spigot;
 
+import dev.faststats.Metrics;
+import dev.faststats.bukkit.BukkitContext;
 import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.command.TabExecutor;
@@ -51,6 +53,9 @@ import java.util.concurrent.TimeoutException;
  * @since 1.0.0-SNAPSHOT
  */
 public class TachyonCore extends JavaPlugin implements TachyonAPI {
+
+
+    private final BukkitContext fastStatsContext = new BukkitContext.Factory(this, "f72ccbdc64780bbf3be46ff22903de1f").metrics(Metrics.Factory::create).create();
 
     private static TachyonCore instance;
     private TachyonLogger logger;
@@ -113,6 +118,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         scheduleAutoSave();
         this.healthService.startHealthMonitoring();
         this.tachyonDisabling = false;
+        this.fastStatsContext.ready();
         this.logger.info("Tachyon Core [{}] initialized.", config.serverName());
     }
 
@@ -137,6 +143,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
     @Override
     public void onDisable() {
         this.logger.info("Starting graceful shutdown...");
+        this.fastStatsContext.shutdown();
         this.tachyonDisabling = true;
 
         if (autoSaveTask != null) {
