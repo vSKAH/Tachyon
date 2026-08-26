@@ -39,6 +39,9 @@ public class ConnectionListener implements Listener {
     @EventHandler(priority = EventPriority.LOWEST)
     public void onPreLogin(AsyncPlayerPreLoginEvent event) {
         if (event.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) return;
+        if (!plugin.getHealthService().isHealthy()) {
+            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, "Tachyon back-end is currently unreachable ! Please contact an administrator");
+        }
 
         final UUID uuid = event.getUniqueId();
         LOGGER.info("Processing pre-login for {} ({})", event.getName(), uuid);

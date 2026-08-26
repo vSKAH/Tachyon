@@ -1,4 +1,4 @@
-package tech.skworks.tachyon.api.services;
+package tech.skworks.tachyon.api.system;
 
 import java.util.concurrent.CompletableFuture;
 
@@ -10,8 +10,10 @@ import java.util.concurrent.CompletableFuture;
  * @version 1.0
  * @since 1.0.0-SNAPSHOT
  */
-public interface SystemService {
+public interface HealthService {
 
-    CompletableFuture<Boolean> pingBackend();
+    CompletableFuture<PingResponse> pingBackend();
+
+    boolean isHealthy();
 
 }

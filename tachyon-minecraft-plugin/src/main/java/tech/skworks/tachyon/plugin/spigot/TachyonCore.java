@@ -16,9 +16,11 @@ import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
 import tech.skworks.tachyon.api.services.*;
 import tech.skworks.tachyon.api.snapshot.SnapshotService;
+import tech.skworks.tachyon.api.system.PingResponse;
+import tech.skworks.tachyon.api.system.HealthService;
 import tech.skworks.tachyon.plugin.core.audit.GrpcAuditService;
 import tech.skworks.tachyon.plugin.core.event.TachyonEventBusImpl;
-import tech.skworks.tachyon.plugin.core.system.GrpcSystemService;
+import tech.skworks.tachyon.plugin.core.system.HealthServiceImpl;
 import tech.skworks.tachyon.plugin.spigot.command.SnapshotCommand;
 import tech.skworks.tachyon.plugin.spigot.config.TachyonConfig;
 import tech.skworks.tachyon.plugin.core.playersession.GrpcPlayerSessionService;
@@ -60,7 +62,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
     private TachyonProfileRegistry tachyonProfileRegistry;
 
     private BackendStubProvider backendStubProvider;
-    private SystemService systemService;
+    private HealthServiceImpl healthService;
     private GrpcAuditService grpcAuditService;
     private GrpcPlayerDataService grpcPlayerDataService;
     private GrpcPlayerSessionService grpcPlayerSessionService;
@@ -69,7 +71,6 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
     private TachyonEventBusImpl eventBusImpl;
 
     private BukkitTask autoSaveTask;
-    private AutoSaveTask autoSaveRunnable;
 
     private boolean tachyonDisabling;
 
@@ -90,20 +91,9 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         this.tachyonProfileRegistry = new TachyonProfileRegistryImpl(componentRegistryImpl, metricsService.getTachyonMetrics(), eventBusImpl);
 
         this.backendStubProvider = new BackendStubProvider(config.grpcHost(), config.grpcPort());
-        this.systemService = new GrpcSystemService(metricsService.getTachyonMetrics(), backendStubProvider, config.serverName());
-        this.logger.info("Testing connection to Quarkus Backend at {}:{}...", config.grpcHost(), config.grpcPort());
+        this.healthService = new HealthServiceImpl(metricsService.getTachyonMetrics(), backendStubProvider, config.serverName());
 
-        try {
-            if (!systemService.pingBackend().get(10, TimeUnit.SECONDS)) {
-                errorShutdown();
-                return;
-            }
-        } catch (InterruptedException | ExecutionException | TimeoutException e) {
-            errorShutdown();
-            throw new RuntimeException(e);
-        }
-
-        this.logger.info("Connection successful ! Backend is healthy.");
+        if (!checkStartupBackendHealth()) return;
 
         this.grpcAuditService = new GrpcAuditService(metricsService.getTachyonMetrics(), backendStubProvider, config);
         this.grpcPlayerDataService = new GrpcPlayerDataService(backendStubProvider, getDataFolder(), metricsService.getTachyonMetrics());
@@ -112,7 +102,6 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
         this.logger.info("Grpc Services has been initialized.");
 
-        // Re-inject any dead-letter payloads a previous run left on disk — the backend is healthy now.
         this.grpcPlayerDataService.replayRecoveryFiles();
 
         this.metricsService.startMetricsCollection(config.metricsConfig());
@@ -122,18 +111,33 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         getServer().getServicesManager().register(TachyonAPI.class, this, this, ServicePriority.Highest);
 
         scheduleAutoSave();
+        this.healthService.startHealthMonitoring();
         this.tachyonDisabling = false;
         this.logger.info("Tachyon Core [{}] initialized.", config.serverName());
+    }
+
+    private boolean checkStartupBackendHealth() {
+        this.logger.info("Testing connection to Quarkus Backend at {}:{}...", config.grpcHost(), config.grpcPort());
+
+        try {
+            PingResponse ping = healthService.pingBackend().get(5, TimeUnit.SECONDS);
+            if (ping == null || !ping.healthy()) {
+                errorShutdown();
+                return false;
+            }
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            errorShutdown();
+            throw new RuntimeException(e);
+        }
+
+        this.logger.info("Connection successful ! Backend is healthy.");
+        return true;
     }
 
     @Override
     public void onDisable() {
         this.logger.info("Starting graceful shutdown...");
         this.tachyonDisabling = true;
-
-        if (autoSaveRunnable != null) {
-            autoSaveRunnable.run();
-        }
 
         if (autoSaveTask != null) {
             autoSaveTask.cancel();
@@ -150,7 +154,6 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
             for (TachyonProfile profile : profiles) {
                 CompletableFuture<Void> safeSave = getPlayerDataService().pushProfile(profile)
-                        //TODO unlocking profiles
                         .exceptionally(ex -> {
                             logger.error("saveProfile() failed at shutdown for {}: {}", profile.getUuid(), ex.getMessage());
                             return null;
@@ -171,6 +174,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
             this.eventBusImpl.shutdown();
         }
 
+        if (healthService != null) healthService.shutdown();
         if (grpcAuditService != null) grpcAuditService.shutdown();
         if (grpcPlayerDataService != null) grpcPlayerDataService.shutdown();
         if (grpcSnapshotService != null) grpcSnapshotService.shutdown();
@@ -195,11 +199,9 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         }
 
         final long intervalTicks = Math.max(1, playerDataConfig.dataAutoSaveDelay()) * 20L;
+        this.autoSaveTask = getServer().getScheduler().runTaskTimerAsynchronously(this, new AutoSaveTask(this), intervalTicks, intervalTicks);
 
-        this.autoSaveRunnable = new AutoSaveTask(logger, tachyonProfileRegistry, grpcPlayerDataService);
-        this.autoSaveTask = getServer().getScheduler().runTaskTimerAsynchronously(this, autoSaveRunnable, intervalTicks, intervalTicks);
-
-        logger.info("Auto-save enabled — flushing all dirty profiles every {}s (no per-tick limit).", playerDataConfig.dataAutoSaveDelay());
+        logger.info("Auto-save enabled — flushing all dirty profiles every {}s.", playerDataConfig.dataAutoSaveDelay());
     }
 
     public static TachyonLogger getModuleLogger(@NotNull final String moduleName) {
@@ -239,8 +241,8 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
     }
 
     @Override
-    public SystemService getSystemService() {
-        return systemService;
+    public HealthService getHealthService() {
+        return healthService;
     }
 
     @Override

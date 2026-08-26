@@ -176,8 +176,6 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
                             rawRequest
                             );
 
-                    //TODO: Mark as clean
-                   // tachyonProfile.markAsClean(dirty, removeArray);
                     future.complete(null);
                     return true;
 
@@ -276,8 +274,8 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
         vThreadExecutor.shutdown();
 
         try {
-            if (!vThreadExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
-                LOGGER.warn("vThreadExecutor did not terminate within 30s — forcing shutdown.");
+            if (!vThreadExecutor.awaitTermination(15, TimeUnit.SECONDS)) {
+                LOGGER.warn("vThreadExecutor did not terminate within 15s — forcing shutdown.");
                 vThreadExecutor.shutdownNow();
             }
             if (!retryScheduler.awaitTermination(2, TimeUnit.SECONDS)) {
@@ -345,18 +343,21 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
         LOGGER.info("[RECOVERY] Replaying {} pending recovery file(s) to backend.", binFiles.size());
 
         for (final Path file : binFiles) {
-         //   replaySingleRecoveryFile(file);
+            replaySingleRecoveryFile(file);
         }
     }
 
-    /*private void replaySingleRecoveryFile(@NotNull final Path file) {
+    private void replaySingleRecoveryFile(@NotNull final Path file) {
         final byte[] bytes;
-        final PushProfileRequest request;
+        final RawBsonDocument rawRequest;
         final UUID uuid;
         try {
             bytes = Files.readAllBytes(file);
-            request = PushProfileRequest.parseFrom(bytes);
-            uuid = UUID.fromString(request.getUuid());
+            rawRequest = new RawBsonDocument(bytes);
+            if (!rawRequest.containsKey("uuid") || !rawRequest.isString("uuid")) {
+                throw new IllegalArgumentException("Missing or invalid 'uuid' field in recovery BSON");
+            }
+            uuid = UUID.fromString(rawRequest.getString("uuid").getValue());
         } catch (Exception e) {
             LOGGER.error(e, "[RECOVERY] Corrupt recovery file {} — quarantined.", file.getFileName());
             quarantine(file);
@@ -365,12 +366,20 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
 
         deleteQuietly(file);
 
-        final int count = request.getComponentsToSaveCount() + request.getComponentsToRemoveCount();
+        int saveCount = (rawRequest.containsKey("save") && rawRequest.isDocument("save")) ? rawRequest.getDocument("save").size() : 0;
+        int removeCount = (rawRequest.containsKey("remove") && rawRequest.isArray("remove")) ? rawRequest.getArray("remove").size() : 0;
+        final int count = saveCount + removeCount;
+
         createQueue(uuid, new RetryTask(uuid) {
             @Override
             public boolean execute() {
                 try (var _ = startTimer("ReplayProfile")) {
-                    backendStubProvider.getPlayerDataStub(4).pushProfile(request);
+                    ClientCalls.blockingUnaryCall(
+                            backendStubProvider.getChannel(),
+                            DataContract.PUSH_PROFILE_METHOD,
+                            CallOptions.DEFAULT.withDeadlineAfter(4, TimeUnit.SECONDS),
+                            rawRequest
+                    );
                     LOGGER.info("[RECOVERY] Replayed recovery data for {} ({} components).", uuid, count);
                     return true;
 
@@ -404,18 +413,6 @@ public class GrpcPlayerDataService extends AbstractGrpcService implements Player
                 return "ReplayProfile(" + count + " components)";
             }
         });
-    }
-
-
-     */
-    public boolean hasRecoveryBinary() {
-        final Path datasFolder = RecoveryLayout.dataDir(pluginDataFolder.toPath());
-        if (!Files.isDirectory(datasFolder)) return false;
-        try (DirectoryStream<Path> directory = Files.newDirectoryStream(datasFolder, RecoveryLayout.BIN_GLOB)) {
-            return directory.iterator().hasNext();
-        } catch (IOException e) {
-            return false;
-        }
     }
 
     private static void quarantine(@NotNull final Path file) {

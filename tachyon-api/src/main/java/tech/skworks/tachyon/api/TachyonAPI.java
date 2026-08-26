@@ -7,6 +7,7 @@ import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
 import tech.skworks.tachyon.api.services.*;
 import tech.skworks.tachyon.api.snapshot.SnapshotService;
+import tech.skworks.tachyon.api.system.HealthService;
 
 /**
  * Project Tachyon
@@ -54,9 +55,9 @@ public interface TachyonAPI {
      * This service manages low-level operations such as back-end ping.
      * </p>
      *
-     * @return The active {@link SystemService} instance.
+     * @return The active {@link HealthService} instance.
      */
-    SystemService getSystemService();
+    HealthService getHealthService();
 
     /**
      * Retrieves the auditing service used to dispatch player actions and security events

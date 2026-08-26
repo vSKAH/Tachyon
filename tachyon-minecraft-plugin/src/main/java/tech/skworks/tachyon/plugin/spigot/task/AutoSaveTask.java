@@ -1,11 +1,15 @@
 package tech.skworks.tachyon.plugin.spigot.task;
 
+import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
+import tech.skworks.tachyon.api.system.HealthService;
 import tech.skworks.tachyon.plugin.common.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.core.playerdata.GrpcPlayerDataService;
+import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Project Tachyon
@@ -22,51 +26,54 @@ import java.util.List;
  */
 public class AutoSaveTask implements Runnable {
 
-    private final TachyonLogger logger;
-    private final GrpcPlayerDataService grpcPlayerDataService;
+
+    private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("AutoSave");
+
+    private final PlayerDataService grpcPlayerDataService;
     private final TachyonProfileRegistry tachyonProfileRegistry;
-    private boolean processing = false;
+    private final HealthService healthService;
 
-    public AutoSaveTask(TachyonLogger logger, TachyonProfileRegistry tachyonProfileRegistry,
-                        GrpcPlayerDataService grpcPlayerDataService) {
-        this.logger = logger;
-        this.tachyonProfileRegistry = tachyonProfileRegistry;
-        this.grpcPlayerDataService = grpcPlayerDataService;
+    private final AtomicBoolean processing = new AtomicBoolean(false);
 
+    public AutoSaveTask(TachyonCore plugin) {
+        this.tachyonProfileRegistry = plugin.getTachyonProfileRegistry();
+        this.grpcPlayerDataService = plugin.getPlayerDataService();
+        this.healthService = plugin.getHealthService();
     }
 
 
     @Override
     public void run() {
 
-
-        if (processing) return;
-
-        processing = true;
-        List<TachyonProfile> dirtyProfiles = tachyonProfileRegistry.getProfiles().stream()
-                .filter(TachyonProfile::hasPendingChanges)
-                .toList();
-
-
-        if (dirtyProfiles.isEmpty()) {
-            processing = false;
+        if (!healthService.isHealthy()) {
+            LOGGER.warn("Auto-Save Task is discontinued due to back-end health status.");
             return;
         }
 
-
-        for (int index = 0; index < dirtyProfiles.size(); index++) {
-            final TachyonProfile profile = dirtyProfiles.get(index);
-
-            if (!profile.hasPendingChanges()) continue;
-
-            grpcPlayerDataService.pushProfile(profile)
-                    .exceptionally(ex -> {
-                        logger.error("Auto-save failed for {}: {}", profile.getUuid(), ex.getMessage());
-                        return null;
-                    });
+        if (!processing.compareAndSet(false, true)) {
+            return;
         }
 
-        processing = false;
+        try {
+            final var dirtyProfiles = tachyonProfileRegistry.getProfiles().stream().filter(TachyonProfile::hasPendingChanges).toList();
+
+            if (dirtyProfiles.isEmpty()) {
+                return;
+            }
+
+            for (int index = 0; index < dirtyProfiles.size(); index++) {
+                final TachyonProfile profile = dirtyProfiles.get(index);
+
+                grpcPlayerDataService.pushProfile(profile).exceptionally(ex -> {
+                    LOGGER.error("Auto-save failed for {}: {}", profile.getUuid(), ex.getMessage());
+                    return null;
+                });
+            }
+
+        } finally {
+            processing.set(false);
+        }
+
 
     }
 }

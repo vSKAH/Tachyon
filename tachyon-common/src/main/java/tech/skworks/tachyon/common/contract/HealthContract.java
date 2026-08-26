@@ -17,14 +17,14 @@ import tech.skworks.tachyon.common.contract.util.ContractCreator;
  * @version 1.0
  * @since 2.0.0-SNAPSHOT
  */
-public class SystemContract extends ContractCreator {
+public class HealthContract extends ContractCreator {
 
-    public static final String SERVICE_NAME = "tech.skworks.tachyon.common.contract.SystemService";
+    public static final String SERVICE_NAME = "tech.skworks.tachyon.common.contract.HealthService";
 
     public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> PING_METHOD = createMethod(SERVICE_NAME,"Ping");
 
-    private SystemContract() {
-        throw new RuntimeException("Unable to instantiate SystemContract");
+    private HealthContract() {
+        throw new RuntimeException("Unable to instantiate HealthContract");
     }
 
 
