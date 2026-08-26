@@ -82,6 +82,10 @@
 
         <dependency>
             <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-config-yaml</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit</artifactId>
             <scope>test</scope>
         </dependency>
@@ -90,13 +94,9 @@
             <artifactId>url-connection-client</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-container-image-jib</artifactId>
-        </dependency>
-        <dependency>
             <groupId>tech.sk-works.minecraft</groupId>
             <artifactId>tachyon-common</artifactId>
-            <version>2.0.0-SNAPSHOT</version>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
 
@@ -163,6 +163,25 @@
                 <skipITs>false</skipITs>
                 <quarkus.native.enabled>true</quarkus.native.enabled>
             </properties>
+        </profile>
+        <profile>
+            <id>build-docker-image</id>
+            <properties>
+                <quarkus.container-image.build>true</quarkus.container-image.build>
+                <quarkus.container-image.push>true</quarkus.container-image.push>
+                <quarkus.container-image.registry>docker-registry.skworks.tech</quarkus.container-image.registry>
+                <quarkus.container-image.group>skworks</quarkus.container-image.group>
+                <quarkus.container-image.name>tachyon-service</quarkus.container-image.name>
+                <quarkus.container-image.tag>${project.parent.version}</quarkus.container-image.tag>
+                <quarkus.container-image.insecure>true</quarkus.container-image.insecure>
+                <quarkus.jib.platforms>linux/amd64</quarkus.jib.platforms>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>io.quarkus</groupId>
+                    <artifactId>quarkus-container-image-jib</artifactId>
+                </dependency>
+            </dependencies>
         </profile>
     </profiles>
 </project>

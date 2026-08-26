@@ -1,0 +1,46 @@
+quarkus:
+  application:
+    name: "tachyon-primary"
+  log:
+    console:
+      format: "%d{HH:mm:ss} %-5p traceId=%X{trace_id}, parentId=%X{parent_id}, spanId=%X{span_id}, sampled=%X{sampled} [%c{2.}] (%t) %s%e%n"
+
+  grpc:
+    server:
+      max-inbound-message-size: 33554432
+      netty:
+        permit-keep-alive-without-calls: true
+        permit-keep-alive-time: PT10S
+
+  redis:
+    max-pool-size: 128
+    max-pool-waiting: 4096
+    timeout: PT10S
+
+  otel:
+    exporter:
+      otlp:
+        enabled: true
+        endpoint: "http://jaeger:4317"
+    traces:
+      sampler: "parentbased_traceidratio"
+      "sampler.arg": 0.05
+
+  micrometer:
+    export:
+      prometheus:
+        enabled: true
+        path: "/q/metrics"
+
+  mongodb:
+    database: "tachyon"
+    max-pool-size: 60
+    min-pool-size: 20
+    read-timeout: "PT20S"
+    server-selection-timeout: "PT10S"
+    connect-timeout: "PT10S"
+    max-connection-idle-time: "PT30S"
+    write-concern:
+      w: 1
+      journal: false
+    read-preference: "primaryPreferred"
