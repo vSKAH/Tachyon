@@ -50,7 +50,7 @@ public class PlayerDataGrpcService implements BindableService {
     @Inject
     PlayerConfig config;
 
-    @ConfigProperty(name = "quarkus.mongodb.database")
+    @ConfigProperty(name = "quarkus.mongodb.database", defaultValue = "tachyon")
     String dbName;
     @Inject
     ReactiveMongoClient mongoClient;

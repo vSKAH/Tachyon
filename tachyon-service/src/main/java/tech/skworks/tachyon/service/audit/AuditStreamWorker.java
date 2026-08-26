@@ -45,7 +45,7 @@ class AuditStreamWorker {
     @Inject
     AuditConfig config;
 
-    @ConfigProperty(name = "quarkus.mongodb.database")
+    @ConfigProperty(name = "quarkus.mongodb.database", defaultValue = "tachyon")
     String dbName;
 
     private final ReactiveStreamCommands<String, String, byte[]> redisStream;

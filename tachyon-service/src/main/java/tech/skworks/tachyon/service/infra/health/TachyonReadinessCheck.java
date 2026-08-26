@@ -28,7 +28,7 @@ public class TachyonReadinessCheck implements HealthCheck {
     @Inject
     RedisDataSource redis;
 
-    @ConfigProperty(name = "quarkus.mongodb.database")
+    @ConfigProperty(name = "quarkus.mongodb.database", defaultValue = "tachyon")
     String dbName;
 
 

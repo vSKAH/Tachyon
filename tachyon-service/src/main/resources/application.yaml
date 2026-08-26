@@ -1,38 +1,50 @@
+tachyon:
+  audit:
+    collection: "audit_logs"
+    stream-key: "tachyon:audit_stream"
+    stream-group-name: "tachyon:audit_group"
+    consumer-id: "audit_worker_1"
+  player:
+    collection: "players"
+    stream-key: "tachyon:player_stream"
+    consumer-id: "tachyon:player_worker_1"
+    stream-group-name: "tachyon:player_group"
+  snapshot:
+    collection: "snapshots"
+    stream-key: "tachyon:snapshot_stream"
+    consumer-id: "tachyon:snapshot_worker_1"
+    stream-group-name: "tachyon:snapshot_group"
+    dlq-stream-key: "tachyon:snapshot_dlq"
+    s3-bucket: "tachyon-1"
+    retention-days: 7
+    max-concurrent-uploads: 10
+    throttle-seconds: 300
+
 quarkus:
+  http:
+    host-enabled: true
+    host: "0.0.0.0"
   application:
     name: "tachyon-primary"
   log:
     console:
       format: "%d{HH:mm:ss} %-5p traceId=%X{trace_id}, parentId=%X{parent_id}, spanId=%X{span_id}, sampled=%X{sampled} [%c{2.}] (%t) %s%e%n"
-
   grpc:
     server:
       max-inbound-message-size: 33554432
       netty:
         permit-keep-alive-without-calls: true
         permit-keep-alive-time: PT10S
-
   redis:
+    client-name: "tachyon-primary"
     max-pool-size: 128
     max-pool-waiting: 4096
     timeout: PT10S
-
-  otel:
-    exporter:
-      otlp:
-        enabled: true
-        endpoint: "http://jaeger:4317"
-    traces:
-      sampler: "parentbased_traceidratio"
-      "sampler.arg": 0.05
-
-  micrometer:
-    export:
-      prometheus:
-        enabled: true
-        path: "/q/metrics"
-
+    hosts:
+      - "redis://:password@host:6000"
   mongodb:
+    connection-string: "mongodb://username:password@host:port/?tls=false"
+    application-name: "tachyon-primary"
     database: "tachyon"
     max-pool-size: 60
     min-pool-size: 20
@@ -44,3 +56,28 @@ quarkus:
       w: 1
       journal: false
     read-preference: "primaryPreferred"
+  s3:
+    endpoint-override: "https://your-s3.com"
+    aws:
+      region: "main"
+      credentials:
+        type: static
+        static-provider:
+          access-key-id: "access-key"
+          secret-access-key: "secret-key"
+
+  otel:
+    exporter:
+      otlp:
+        enabled: true
+        endpoint: "http://jaeger:4317"
+    traces:
+      sampler: "parentbased_traceidratio"
+      "sampler.arg": 0.05
+  micrometer:
+    export:
+      prometheus:
+        enabled: true
+        path: "/q/metrics"
+
+

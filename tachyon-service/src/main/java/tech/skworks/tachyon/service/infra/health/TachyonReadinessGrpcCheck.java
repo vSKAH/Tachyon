@@ -26,7 +26,7 @@ import tech.skworks.tachyon.common.marshaller.BsonMarshaller;
 @NonBlocking
 public class TachyonReadinessGrpcCheck implements BindableService {
 
-    @ConfigProperty(name = "quarkus.application.name", defaultValue = "Tachyon-Primary")
+    @ConfigProperty(name = "quarkus.application.name", defaultValue = "tachyon-primary")
     String applicationName;
 
     @ConfigProperty(name = "quarkus.mongodb.database", defaultValue = "tachyon")

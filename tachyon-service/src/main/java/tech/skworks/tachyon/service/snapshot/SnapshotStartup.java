@@ -40,7 +40,7 @@ public class SnapshotStartup {
 
     @Inject
     MongoClient mongo;
-    @ConfigProperty(name = "quarkus.mongodb.database")
+    @ConfigProperty(name = "quarkus.mongodb.database", defaultValue = "tachyon")
     String mongoDatabase;
 
     void onStart(@Observes StartupEvent ev) {

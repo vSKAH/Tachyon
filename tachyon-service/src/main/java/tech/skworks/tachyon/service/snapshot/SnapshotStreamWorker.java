@@ -50,7 +50,7 @@ public class SnapshotStreamWorker {
     @Inject
     MeterRegistry meterRegistry;
 
-    @ConfigProperty(name = "quarkus.mongodb.database")
+    @ConfigProperty(name = "quarkus.mongodb.database", defaultValue = "tachyon")
     String dbName;
 
     private static final int MAX_RETRIES = 5;

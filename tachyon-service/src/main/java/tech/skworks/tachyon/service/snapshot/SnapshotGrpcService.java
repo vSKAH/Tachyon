@@ -51,7 +51,7 @@ public class SnapshotGrpcService implements BindableService {
     @Inject
     ReactiveMongoClient mongoClient;
 
-    @ConfigProperty(name = "quarkus.mongodb.database")
+    @ConfigProperty(name = "quarkus.mongodb.database", defaultValue = "tachyon")
     String databaseName;
 
     private ReactiveMongoCollection<Document> snapshotCollection;

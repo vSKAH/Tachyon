@@ -48,7 +48,7 @@ public class SnapshotS3Archiver {
     @Inject
     SnapshotConfig config;
 
-    @ConfigProperty(name = "quarkus.mongodb.database")
+    @ConfigProperty(name = "quarkus.mongodb.database", defaultValue = "tachyon")
     String dbName;
 
     private ValueCommands<String, String> redisString;
