@@ -41,7 +41,7 @@ quarkus:
     max-pool-waiting: 4096
     timeout: PT10S
     hosts:
-      - "redis://:password@host:6000"
+      - "redis://:password@host:6000/1"
   mongodb:
     connection-string: "mongodb://username:password@host:port/?tls=false"
     application-name: "tachyon-primary"
