@@ -63,6 +63,7 @@ public class PlayerDataGrpcService implements BindableService {
     private final ReactiveStreamCommands<String, String, byte[]> redisStream;
     private final ReactiveKeyCommands<String> redisKey;
 
+
     public PlayerDataGrpcService(ReactiveRedisDataSource redisDS) {
         this.redisString = redisDS.value(String.class);
         this.redisBytes = redisDS.value(byte[].class);
