@@ -1,4 +1,4 @@
-#set( $MAVEN_VERSION = "2.0.0-SNAPSHOT" )
+#set( $MAVEN_VERSION = "2.0.0-beta.1" )
 /**
  * Short class explaination
  * <p>
