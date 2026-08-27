@@ -50,37 +50,35 @@ public class MetricsService {
         try {
             httpServer = HttpServer.create(new InetSocketAddress(metricsConfig.metricsHost(), metricsConfig.metricsPort()), 0);
             httpServer.createContext("/metrics", httpExchange -> {
-                try {
-                    if (!"GET".equalsIgnoreCase(httpExchange.getRequestMethod()) && !"HEAD".equalsIgnoreCase(httpExchange.getRequestMethod())) {
-                        httpExchange.sendResponseHeaders(405, -1);
-                        return;
-                    }
-
-                    String response = registry.scrape();
-                    byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
-                    httpExchange.getResponseHeaders().set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
-                    httpExchange.sendResponseHeaders(200, bytes.length);
-
-                    if ("GET".equalsIgnoreCase(httpExchange.getRequestMethod())) {
-                        try (OutputStream os = httpExchange.getResponseBody()) {
-                            os.write(bytes);
-                            os.flush();
-                        }
-                    }
-                } catch (IOException e) {
-                    String message = e.getMessage();
-                    if (message != null && (message.contains("Broken pipe") || message.contains("Connection reset") || message.contains("connection abort"))) {
-                        LOGGER.debug("Client disconnected while scraping /metrics: {}", message);
-                    } else {
-                        LOGGER.error(e, "I/O error serving /metrics HTTP request");
-                    }
-                } catch (Exception e) {
-                    LOGGER.error(e, "Error serving /metrics HTTP request");
-                } finally {
+                try (httpExchange) {
                     try {
-                        httpExchange.close();
-                    } catch (Exception ignored) {
+                        if (!"GET".equalsIgnoreCase(httpExchange.getRequestMethod()) && !"HEAD".equalsIgnoreCase(httpExchange.getRequestMethod())) {
+                            httpExchange.sendResponseHeaders(405, -1);
+                            return;
+                        }
+
+                        String response = registry.scrape();
+                        byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
+                        httpExchange.getResponseHeaders().set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+                        httpExchange.sendResponseHeaders(200, bytes.length);
+
+                        if ("GET".equalsIgnoreCase(httpExchange.getRequestMethod())) {
+                            try (OutputStream os = httpExchange.getResponseBody()) {
+                                os.write(bytes);
+                                os.flush();
+                            }
+                        }
+                    } catch (IOException e) {
+                        String message = e.getMessage();
+                        if (message != null && (message.contains("Broken pipe") || message.contains("Connection reset") || message.contains("connection abort"))) {
+                            LOGGER.debug("Client disconnected while scraping /metrics: {}", message);
+                        } else {
+                            LOGGER.error(e, "I/O error serving /metrics HTTP request");
+                        }
+                    } catch (Exception e) {
+                        LOGGER.error(e, "Error serving /metrics HTTP request");
                     }
+                } catch (Exception ignored) {
                 }
             });
             httpServer.start();
