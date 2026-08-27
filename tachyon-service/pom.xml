@@ -165,6 +165,12 @@
             </properties>
         </profile>
         <profile>
+            <id>uber-jar</id>
+            <properties>
+                <quarkus.package.jar.type>uber-jar</quarkus.package.jar.type>
+            </properties>
+        </profile>
+        <profile>
             <id>build-docker-image</id>
             <properties>
                 <quarkus.container-image.build>true</quarkus.container-image.build>
