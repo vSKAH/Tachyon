@@ -32,6 +32,14 @@ public class TachyonLogger {
         log.warn(new ParameterizedMessage(prefix + message, params));
     }
 
+    public void debug(String message, Object... params) {
+        log.debug(new ParameterizedMessage(prefix + message, params));
+    }
+
+    public void debug(Throwable exception, String message, Object... params) {
+        log.debug(new ParameterizedMessage(prefix + message, params), exception);
+    }
+
     public void error(String message, Object... params) {
         log.error(new ParameterizedMessage(prefix + message, params));
     }

@@ -1,7 +1,6 @@
 target/
 .quarkus/
 .mvn/
-wiki/
 
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
