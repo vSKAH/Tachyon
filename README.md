@@ -51,6 +51,27 @@ Instead of writing repetitive SQL queries or battling dupe glitches when players
 
 ---
 
+## 🔥Next Features Planned
+
+ ### ⚡ Performance & Core Engine
+   - [ ] **Redis Lua Optimization**: Replace multi-step network calls with atomic Lua scripts (`EVALSHA`) for state locks, cache lookups, and batch heartbeats.
+   - [ ] **Zero-Latency Proxy Pre-fetching**: Velocity/BungeeCord integration to preload player data during server switches.
+   - [ ] **Folia Compatibility**: Dedicated testing and concurrency adaptations for Folia regionized threading.
+   - [ ] **Custom ItemStack Serialization**: High-performance NBT to BSON bridge supporting all ItemMeta & Data Components while remaining Humans and MongoDB friendly
+
+ ### ⏪ Snapshots & Recovery
+   - [ ] **In-Game Restorations**: Restore full profiles or single components via `/snapshot restore` and interactive GUI menus.
+
+  ### 📚 Documentation & Dev Experience
+   - [ ] **Complete JavaDoc Coverage**: Comprehensive documentation across `tachyon-api` and `tachyon-common`.
+   - [ ] **2.0.0 Wiki Rewrite**: Updated guides for Quarkus backend deployment, custom component creation, and migration.
+
+  ### 🚀 DevOps & CI/CD
+   - [ ] **Automated Release Pipeline**: GitHub Actions workflow for tagged releases (Reposilite JARs + Docker Registry images).
+   - [ ] **Turnkey Alerting**: Pre-configured Prometheus alert rules for Grafana (lock contention, DLQ spikes, latency).
+
+---
+
 ## 🏗️ Architecture Overview
 
 ```mermaid
