@@ -22,8 +22,9 @@ import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.SnapshotContract;
-import tech.skworks.tachyon.common.marshaller.BsonMarshaller;
+import tech.skworks.tachyon.common.types.Empty;
 import tech.skworks.tachyon.service.audit.AuditGrpcService;
 
 import java.nio.charset.StandardCharsets;
@@ -159,7 +160,7 @@ public class SnapshotGrpcService implements BindableService {
                                             BsonDocument respDoc = new BsonDocument()
                                                     .append("snapshot_id", new BsonString(snapshotId))
                                                     .append("locked", new BsonBoolean(newLockStatus));
-                                            return Uni.createFrom().item(BsonMarshaller.toRawBsonDocument(respDoc));
+                                            return Uni.createFrom().item(BsonUtil.toRawBsonDocument(respDoc));
                                         })
                                         .onFailure().invoke(e -> {
                                             if (!(e instanceof StatusRuntimeException)) {
@@ -174,7 +175,7 @@ public class SnapshotGrpcService implements BindableService {
                 });
     }
 
-    public Uni<RawBsonDocument> takeDatabaseSnapshot(RawBsonDocument req) {
+    public Uni<Empty> takeDatabaseSnapshot(RawBsonDocument req) {
         if (!req.containsKey("uuid")) {
             return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("uuid is required").asRuntimeException());
         }
@@ -185,7 +186,7 @@ public class SnapshotGrpcService implements BindableService {
         return pushToStream(payload);
     }
 
-    public Uni<RawBsonDocument> takeComponentSnapshot(RawBsonDocument req) {
+    public Uni<Empty> takeComponentSnapshot(RawBsonDocument req) {
         if (!req.containsKey("uuid") || !req.containsKey("target_component")) {
             return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("uuid and target_component are required for specific snapshots.").asRuntimeException());
         }
@@ -196,12 +197,12 @@ public class SnapshotGrpcService implements BindableService {
         return pushToStream(payload);
     }
 
-    private Uni<RawBsonDocument> pushToStream(Map<String, byte[]> payload) {
+    private Uni<Empty> pushToStream(Map<String, byte[]> payload) {
         payload.put("source", "EXTERNAL".getBytes(StandardCharsets.UTF_8));
         payload.put("timestamp", String.valueOf(System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8));
 
         return redisStream.xadd(snapshotConfig.streamKey(), STREAM_ARGS, payload)
-                .replaceWith(BsonMarshaller.EMPTY)
+                .replaceWith(Empty.INSTANCE)
                 .onFailure().invoke(e -> logger.error("Redis Stream Error", e))
                 .onFailure().transform(e -> Status.UNAVAILABLE.withDescription("The snapshot buffer (Redis) is currently unavailable.").withCause(e).asRuntimeException());
     }
@@ -251,7 +252,7 @@ public class SnapshotGrpcService implements BindableService {
                             .append("uuid", new BsonString(uuid))
                             .append("snapshots", snapshotsArray);
 
-                    return BsonMarshaller.toRawBsonDocument(responseDoc);
+                    return BsonUtil.toRawBsonDocument(responseDoc);
                 });
     }
 
@@ -292,7 +293,7 @@ public class SnapshotGrpcService implements BindableService {
                         response.append("components", new BsonDocument());
                     }
 
-                    return BsonMarshaller.toRawBsonDocument(response);
+                    return BsonUtil.toRawBsonDocument(response);
                 })
                 .onFailure().invoke(e -> logger.errorf("Failed to process ViewSnapshot request for ID: %s. Reason: %s", snapshotId, e.getMessage()));
     }

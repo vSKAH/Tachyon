@@ -13,8 +13,8 @@ import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import org.bson.RawBsonDocument;
 import org.jboss.logging.Logger;
-import tech.skworks.tachyon.common.contract.SessionContract;
-import tech.skworks.tachyon.common.marshaller.BsonMarshaller;
+import tech.skworks.tachyon.common.contract.PlayerSessionContract;
+import tech.skworks.tachyon.common.types.Empty;
 import tech.skworks.tachyon.service.infra.RedisKeys;
 
 /**
@@ -39,7 +39,7 @@ public class PlayerSessionGrpcService implements BindableService {
         this.redisKey = redisDS.key();
     }
 
-    public Uni<RawBsonDocument> freePlayer(RawBsonDocument request) {
+    public Uni<Empty> freePlayer(RawBsonDocument request) {
         if (!request.containsKey("uuid") || !request.isString("uuid")) {
             return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("'uuid' must be present to release player profile").asRuntimeException());
         }
@@ -51,18 +51,18 @@ public class PlayerSessionGrpcService implements BindableService {
                 .invoke(deleted -> {
                     if (deleted != null && deleted > 0) log.infof("[PlayerDataGrpcService] State key deleted for %s.", uuid);
                     else log.debugf("[PlayerDataGrpcService] No state key found to delete for %s (already free).", uuid);
-        }).replaceWith(BsonMarshaller.EMPTY)
+        }).replaceWith(Empty.INSTANCE)
                 .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] freePlayer() failed for %s.", uuid))
                 .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Failed to delete state key in Redis!").asRuntimeException());
     }
 
 
-    public Uni<RawBsonDocument> playerHeartBeatBatch(RawBsonDocument request) {
+    public Uni<Empty> playerHeartBeatBatch(RawBsonDocument request) {
         if (!request.containsKey("uuids") || !request.isArray("uuids")) {
-            return Uni.createFrom().item(BsonMarshaller.EMPTY);
+            return Uni.createFrom().item(Empty.INSTANCE);
         }
         var uuids = request.getArray("uuids");
-        if (uuids.isEmpty()) return Uni.createFrom().item(BsonMarshaller.EMPTY);
+        if (uuids.isEmpty()) return Uni.createFrom().item(Empty.INSTANCE);
 
         log.debugf("[PlayerDataGrpcService] Heartbeat batch received — renewing TTL for %d player(s).", uuids.size());
 
@@ -77,7 +77,7 @@ public class PlayerSessionGrpcService implements BindableService {
                             })
                             .onFailure().recoverWithItem(false);
                 }).collect().asList()
-                .replaceWith(BsonMarshaller.EMPTY)
+                .replaceWith(Empty.INSTANCE)
                 .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] Heartbeat batch completely failed."))
                 .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Heartbeat batch failed: " + e.getMessage()).asRuntimeException());
 
@@ -85,15 +85,15 @@ public class PlayerSessionGrpcService implements BindableService {
 
     @Override
     public ServerServiceDefinition bindService() {
-        return ServerServiceDefinition.builder(SessionContract.SERVICE_NAME)
-                .addMethod(SessionContract.FREE_PLAYER_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+        return ServerServiceDefinition.builder(PlayerSessionContract.SERVICE_NAME)
+                .addMethod(PlayerSessionContract.FREE_PLAYER_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
                     freePlayer(request).subscribe().with(response -> {
                         responseObserver.onNext(response);
                         responseObserver.onCompleted();
                     }, responseObserver::onError);
                 }))
 
-                .addMethod(SessionContract.HEARTBEAT_BATCH_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                .addMethod(PlayerSessionContract.HEARTBEAT_BATCH_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
                     playerHeartBeatBatch(request).subscribe().with(response -> {
                         responseObserver.onNext(response);
                         responseObserver.onCompleted();

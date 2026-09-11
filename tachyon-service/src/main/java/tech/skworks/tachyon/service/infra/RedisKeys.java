@@ -31,7 +31,7 @@ public final class RedisKeys {
     /** TTL (seconds) of the dirty guard. */
     public static final int DIRTY_TTL_SECONDS = 20;
     /** TTL (seconds) of the read cache. */
-    public static final int CACHE_TTL_SECONDS = 60;
+    public static final int CACHE_TTL_SECONDS = 60 * 30;
 
     private RedisKeys() {
     }

@@ -12,6 +12,8 @@ import io.quarkus.redis.datasource.stream.StreamMessage;
 import io.quarkus.redis.datasource.stream.XReadGroupArgs;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.quarkus.scheduler.Scheduled;
+import io.smallrye.common.constraint.NotNull;
+import io.smallrye.common.constraint.Nullable;
 import io.smallrye.mutiny.Uni;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -20,16 +22,14 @@ import org.bson.*;
 import org.bson.conversions.Bson;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import tech.skworks.tachyon.common.BsonUtil;
+import tech.skworks.tachyon.common.contract.PlayerDataContract;
 import tech.skworks.tachyon.service.infra.RedisKeys;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
-
-import static tech.skworks.tachyon.service.player.data.PlayerDataGrpcService.toByteArray;
 
 /**
  * Project Tachyon
@@ -96,133 +96,250 @@ class PlayerDataStreamWorker {
                 .chain(messages -> processAndAck(messages, "reclaimed"));
     }
 
-    private Uni<Void> processAndAck(List<StreamMessage<String, String, byte[]>> messages, String origin) {
+    private Uni<Void> processAndAck(final List<StreamMessage<String, String, byte[]>> messages, @NotNull final String origin) {
         if (messages == null || messages.isEmpty()) {
             return Uni.createFrom().voidItem();
         }
 
         log.debugf("[PlayerStreamWorker] Processing %d %s message(s) from stream.", messages.size(), origin);
 
-        List<WriteModel<Document>> bulkOperations = new ArrayList<>();
-        List<String> messagesToAck = new ArrayList<>();
-        List<String> updatedUuids = new ArrayList<>();
-        int failed = 0;
+        final var poisonMessagesToAck = new ArrayList<String>();
+        final var validMessagesToAck = new ArrayList<String>();
+        final var allValidUuids = new HashSet<String>();
+        final var updatesByUuid = new LinkedHashMap<String, PlayerUpdate>();
 
-        for (StreamMessage<String, String, byte[]> msg : messages) {
-            byte[] saveProfilePayload = msg.payload().get("save_profile_payload");
+        for (final var message : messages) {
+            final var payload = message.payload();
+            final byte[] saveProfilePayload = (payload != null) ? payload.get("save_profile_payload") : null;
 
-            if (saveProfilePayload == null) {
-                log.warnf("[PlayerStreamWorker] Message %s has no recognized payload key — poison, dropping (ACK).", msg.id());
-                messagesToAck.add(msg.id());
+            if (saveProfilePayload == null || saveProfilePayload.length == 0) {
+                log.warnf("[PlayerStreamWorker] Message %s has no recognized payload key — poison, dropping (ACK).", message.id());
+                poisonMessagesToAck.add(message.id());
+                continue;
+            }
+
+            final RawBsonDocument requestDocument;
+            try {
+                requestDocument = new RawBsonDocument(saveProfilePayload);
+            } catch (Exception e) {
+                log.warnf("[PlayerStreamWorker] Message %s has corrupted BSON payload (%s) — poison, dropping (ACK).", message.id(), e.getMessage());
+                poisonMessagesToAck.add(message.id());
+                continue;
+            }
+
+            if (!requestDocument.containsKey(PlayerDataContract.FIELD_UUID) || !requestDocument.isString(PlayerDataContract.FIELD_UUID)) {
+                log.warnf("[PlayerStreamWorker] Message %s has missing or non-string 'uuid' — poison, dropping (ACK).", message.id());
+                poisonMessagesToAck.add(message.id());
+                continue;
+            }
+
+            final var uuid = requestDocument.getString(PlayerDataContract.FIELD_UUID).getValue();
+            if (uuid.isBlank()) {
+                log.warnf("[PlayerStreamWorker] Message %s has blank 'uuid' — poison, dropping (ACK).", message.id());
+                poisonMessagesToAck.add(message.id());
                 continue;
             }
 
             try {
-                RawBsonDocument reqDoc = new RawBsonDocument(saveProfilePayload);
-                String uuid = reqDoc.getString("uuid").getValue();
-
-                Document updateOps = buildUpdateOperations(reqDoc);
-                if (!updateOps.isEmpty()) {
-                    bulkOperations.add(new UpdateOneModel<>(
-                            Filters.eq("uuid", uuid),
-                            updateOps,
-                            new UpdateOptions().upsert(true)
-                    ));
-                    updatedUuids.add(uuid);
-                }
-
-                messagesToAck.add(msg.id());
+                final var playerUpdate = updatesByUuid.computeIfAbsent(uuid, k -> new PlayerUpdate());
+                playerUpdate.apply(requestDocument);
+                allValidUuids.add(uuid);
+                validMessagesToAck.add(message.id());
             } catch (Exception e) {
-                log.errorf(e, "[PlayerStreamWorker] Transient failure preparing message %s.", msg.id());
-                failed++;
+                log.warnf(e, "[PlayerStreamWorker] Message %s has invalid structure — poison, dropping (ACK).", message.id());
+                poisonMessagesToAck.add(message.id());
             }
         }
 
-        Uni<Void> mongoUni = bulkOperations.isEmpty()
+        final Uni<Void> ackPoisonUni = poisonMessagesToAck.isEmpty()
+                ? Uni.createFrom().voidItem()
+                : redisStream.xack(config.streamKey(), config.streamGroupName(), poisonMessagesToAck.toArray(new String[0]))
+                .invoke(count -> log.warnf("[PlayerStreamWorker] Dropped %d poison message(s) (ACKed).", count))
+                .replaceWithVoid()
+                .onFailure().invoke(e -> log.error("[PlayerStreamWorker] Failed to ACK poison messages.", e))
+                .onFailure().recoverWithNull();
+
+        if (validMessagesToAck.isEmpty()) {
+            return ackPoisonUni;
+        }
+
+        final var bulkOperations = new ArrayList<WriteModel<Document>>();
+        for (final var entry : updatesByUuid.entrySet()) {
+            final var uuid = entry.getKey();
+            final var playerUpdate = entry.getValue();
+            if (playerUpdate != null) {
+                bulkOperations.addAll(playerUpdate.toModels(uuid));
+            }
+        }
+
+        final Uni<Void> mongoUni = bulkOperations.isEmpty()
                 ? Uni.createFrom().voidItem()
                 : playersCollection.bulkWrite(bulkOperations, new BulkWriteOptions().ordered(false))
                 .invoke(res -> log.infof("[PlayerStreamWorker] BulkWrite written %d operation(s) to MongoDB in 1 network call.", bulkOperations.size()))
                 .replaceWithVoid()
-                .onFailure().invoke(e -> log.error("[PlayerStreamWorker] Error during MongoDB bulkWrite batch execution.", e))
-                .onFailure().recoverWithNull();
+                .onFailure().invoke(e -> log.error("[PlayerStreamWorker] Error during MongoDB bulkWrite batch execution.", e));
 
-        final int finalFailed = failed;
-        return mongoUni
-                .chain(() -> updateCacheBatchAndUnlock(updatedUuids))
-                .chain(() -> {
-                    if (!messagesToAck.isEmpty()) {
-                        return redisStream.xack(config.streamKey(), config.streamGroupName(), messagesToAck.toArray(new String[0])).replaceWithVoid();
-                    }
-                    return Uni.createFrom().voidItem();
-                })
-                .invoke(() -> {
-                    if (finalFailed > 0)
-                        log.warnf("[PlayerStreamWorker] %s cycle — %d ACKed, %d left pending for retry.", origin, messagesToAck.size(), finalFailed);
-                    else
-                        log.debugf("[PlayerStreamWorker] %s cycle — %d message(s) processed successfully.", origin, messagesToAck.size());
-                });
+        final Uni<Void> processValidUni = mongoUni
+                .chain(() -> updateCacheBatchAndUnlock(allValidUuids))
+                .chain(() -> redisStream.xack(config.streamKey(), config.streamGroupName(), validMessagesToAck.toArray(new String[0])).replaceWithVoid())
+                .invoke(() -> log.debugf("[PlayerStreamWorker] %s cycle — %d message(s) processed successfully.", origin, validMessagesToAck.size()));
+
+        return ackPoisonUni.chain(() -> processValidUni);
     }
 
-    private Document buildUpdateOperations(RawBsonDocument reqDoc) {
-        Document updateOperations = new Document();
-        Document setDocument = new Document();
-        Document unsetDocument = new Document();
+    private static final class PlayerUpdate {
+        private final Map<String, BsonValue> componentSaves = new HashMap<>();
+        private final Map<String, Long> componentVersions = new HashMap<>();
+        private final Set<String> componentRemoves = new HashSet<>();
 
-        if (reqDoc.containsKey("save") && reqDoc.isDocument("save")) {
-            BsonDocument saveDocs = reqDoc.getDocument("save");
-            for (String compName : saveDocs.keySet()) {
-                setDocument.put("components." + compName, saveDocs.get(compName));
-            }
-        }
+        public void apply(@NotNull final RawBsonDocument requestDocument) {
+            Objects.requireNonNull(requestDocument, "requestDocument must not be null");
 
-        if (reqDoc.containsKey("remove") && reqDoc.isArray("remove")) {
-            BsonArray removeArray = reqDoc.getArray("remove");
-            for (BsonValue val : removeArray) {
-                if (val.isString()) {
-                    unsetDocument.put("components." + val.asString().getValue(), "");
+            final var incomingVersions = extractVersions(requestDocument);
+            final var saveField = PlayerDataContract.FIELD_SAVE;
+
+            if (requestDocument.containsKey(saveField) && requestDocument.isDocument(saveField)) {
+                final var savesDocument = requestDocument.getDocument(saveField);
+                for (final var componentName : savesDocument.keySet()) {
+                    final var incomingVersion = incomingVersions.get(componentName);
+                    final var currentVersion = componentVersions.get(componentName);
+
+                    if (isStale(incomingVersion, currentVersion)) continue;
+
+                    componentSaves.put(componentName, savesDocument.get(componentName));
+
+                    componentRemoves.remove(componentName);
+                    if (incomingVersion != null) {
+                        componentVersions.put(componentName, incomingVersion);
+                    }
                 }
             }
+
+            final var removeField = PlayerDataContract.FIELD_REMOVE;
+            if (requestDocument.containsKey(removeField) && requestDocument.isArray(removeField)) {
+                final var removeArray = requestDocument.getArray(removeField);
+
+                for (final var arrayElement : removeArray) {
+                    if (!arrayElement.isString()) continue;
+                    final var componentName = arrayElement.asString().getValue();
+                    final var incomingVersion = incomingVersions.get(componentName);
+                    final var currentVersion = componentVersions.get(componentName);
+
+                    if (isStale(incomingVersion, currentVersion)) continue;
+
+                    componentRemoves.add(componentName);
+                    componentSaves.remove(componentName);
+                    if (incomingVersion != null) {
+                        componentVersions.put(componentName, incomingVersion);
+                    }
+
+                }
+
+            }
         }
 
-        if (!setDocument.isEmpty()) {
-            updateOperations.put("$set", setDocument);
-        }
-        if (!unsetDocument.isEmpty()) {
-            updateOperations.put("$unset", unsetDocument);
+        public static boolean isStale(@Nullable final Long incomingVersion, @Nullable final Long currentVersion) {
+            return incomingVersion != null && currentVersion != null && incomingVersion <= currentVersion;
         }
 
-        return updateOperations;
+        private static Bson buildVersionFilter(@NotNull final String uuid, @NotNull final String componentName, @Nullable final Long version) {
+            if (version == null) {
+                return Filters.eq(PlayerDataContract.FIELD_UUID, uuid);
+            }
+            final var specificVersionField = PlayerDataContract.FIELD_VERSIONS + '.' + componentName;
+            return Filters.and(
+                    Filters.eq(PlayerDataContract.FIELD_UUID, uuid),
+                    Filters.or(Filters.exists(specificVersionField, false), Filters.lte(specificVersionField, version))
+            );
+        }
+
+        private static Map<String, Long> extractVersions(@NotNull final RawBsonDocument doc) {
+            final var versionsField = PlayerDataContract.FIELD_VERSIONS;
+            if (!doc.containsKey(versionsField) || !doc.isDocument(versionsField)) {
+                return Map.of();
+            }
+            final var versionsDoc = doc.getDocument(versionsField);
+            final var map = new HashMap<String, Long>(versionsDoc.size());
+            for (final var key : versionsDoc.keySet()) {
+                map.put(key, versionsDoc.getNumber(key).longValue());
+            }
+            return map;
+        }
+
+        public List<WriteModel<Document>> toModels(final @NotNull String uuid) {
+            final var models = new ArrayList<WriteModel<Document>>(componentSaves.size() + componentRemoves.size());
+
+            for (final var saveEntry : componentSaves.entrySet()) {
+                final var componentName = saveEntry.getKey();
+                final var componentData = saveEntry.getValue();
+                final var componentVersion = componentVersions.get(componentName);
+
+                final var filter = buildVersionFilter(uuid, componentName, componentVersion);
+                Bson update;
+
+                final var specificComponentField = PlayerDataContract.FIELD_COMPONENTS + '.' + componentName;
+                final var specificVersionField = PlayerDataContract.FIELD_VERSIONS + '.' + componentName;
+
+                if (componentVersion != null) {
+                    update = Updates.combine(Updates.set(specificComponentField, componentData), Updates.set(specificVersionField, componentVersion));
+                } else {
+                    update = Updates.set(specificComponentField, componentData);
+                }
+                models.add(new UpdateOneModel<>(filter, update, new UpdateOptions().upsert(true)));
+            }
+
+            for (final var componentNameRemove : componentRemoves) {
+
+                final var componentVersion = componentVersions.get(componentNameRemove);
+                final var filter = buildVersionFilter(uuid, componentNameRemove, componentVersion);
+
+                Bson update;
+                final var specificComponentField = PlayerDataContract.FIELD_COMPONENTS + '.' + componentNameRemove;
+                final var specificVersionField = PlayerDataContract.FIELD_VERSIONS + '.' + componentNameRemove;
+
+                if (componentVersion != null)
+                    update = Updates.combine(Updates.unset(specificComponentField), Updates.set(specificVersionField, componentVersion));
+                else
+                    update = Updates.unset(specificComponentField);
+
+
+                models.add(new UpdateOneModel<>(filter, update, new UpdateOptions().upsert(true)));
+            }
+
+            return models;
+        }
+
+
     }
 
-    private static final Bson PROJECTION = Projections.fields(Projections.include("uuid", "components"), Projections.excludeId());
-    private static final FindOptions FIND_OPTIONS = new FindOptions().projection(PROJECTION);
+    private Uni<Void> updateCacheBatchAndUnlock(@NotNull final Collection<String> uuids) {
+        Objects.requireNonNull(uuids, "uuids cannot be null.");
 
-    private Uni<Void> updateCacheBatchAndUnlock(List<String> uuids) {
-        if (uuids == null || uuids.isEmpty()) {
-            return Uni.createFrom().voidItem();
-        }
-        final var uniqueUuids = new HashSet<>(uuids);
+        if (uuids.isEmpty()) return Uni.createFrom().voidItem();
 
-        return rawPlayersCollection.find(Filters.in("uuid", uniqueUuids), FIND_OPTIONS).collect().asList()
+        final var uniqueUuids = (uuids instanceof Set<String> set) ? set : new HashSet<>(uuids);
+
+        return rawPlayersCollection.find(Filters.eq(PlayerDataContract.FIELD_UUID, uniqueUuids), PlayerDataGrpcService.PULL_PROFILE_FIND_OPTIONS).collect().asList()
                 .chain(docs -> {
-                    List<Uni<Void>> setexUnis = new ArrayList<>();
-                    for (RawBsonDocument updatedDoc : docs) {
-                        String uuid = updatedDoc.getString("uuid").getValue();
-                        byte[] cacheBytes = toByteArray(updatedDoc);
-                        setexUnis.add(redisBytes.setex(RedisKeys.cache(uuid), RedisKeys.CACHE_TTL_SECONDS, cacheBytes).invoke(() -> log.debugf("[PlayerStreamWorker] Cache updated for %s (%d bytes).", uuid, cacheBytes.length)));
+                    final var setExpirationsUni = new ArrayList<Uni<Void>>();
+                    for (final RawBsonDocument updatedDocument : docs) {
+                        final var uuid = updatedDocument.getString(PlayerDataContract.FIELD_UUID).getValue();
+                        final var bytesToCache = BsonUtil.toByteArray(updatedDocument);
+                        setExpirationsUni.add(redisBytes.setex(RedisKeys.cache(uuid), RedisKeys.CACHE_TTL_SECONDS, bytesToCache).invoke(() -> log.debugf("[PlayerStreamWorker] Cache updated for %s (%d bytes).", uuid, bytesToCache.length)));
                     }
-                    return setexUnis.isEmpty() ? Uni.createFrom().voidItem() : Uni.combine().all().unis(setexUnis).discardItems();
+                    return setExpirationsUni.isEmpty() ? Uni.createFrom().voidItem() : Uni.combine().all().unis(setExpirationsUni).discardItems();
                 })
                 .onFailure().invoke(e -> log.errorf(e, "[PlayerStreamWorker] Failed to batch update cache for %d player(s).", uniqueUuids.size()))
                 .onFailure().recoverWithNull()
                 .eventually(() -> {
-                    List<String> dirtyKeys = uniqueUuids.stream().map(RedisKeys::dirty).toList();
-                    if (!dirtyKeys.isEmpty()) {
-                        return redisKey.del(dirtyKeys.toArray(new String[0]))
-                                .invoke(deleted -> log.debugf("[PlayerStreamWorker] Released %d dirty key(s) in bulk Redis call.", dirtyKeys.size()))
-                                .replaceWithVoid();
+                    final var dirtyKeys = uniqueUuids.stream().map(RedisKeys::dirty).toList();
+                    if (dirtyKeys.isEmpty()) {
+                        return Uni.createFrom().voidItem();
                     }
-                    return Uni.createFrom().voidItem();
+
+                    return redisKey.del(dirtyKeys.toArray(new String[0]))
+                            .invoke(deleted -> log.debugf("[PlayerStreamWorker] Released %d dirty key(s) in bulk Redis call.", deleted))
+                            .replaceWithVoid();
                 });
     }
 }

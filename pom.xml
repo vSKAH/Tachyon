@@ -6,13 +6,12 @@
 
     <groupId>tech.sk-works.minecraft</groupId>
     <artifactId>tachyon-parent</artifactId>
-    <version>2.0.0-beta.1</version>
+    <version>2.0.0-alpha.2</version>
     <packaging>pom</packaging>
     <modules>
         <module>tachyon-common</module>
-        <module>tachyon-api</module>
         <module>tachyon-service</module>
-        <module>tachyon-minecraft-plugin</module>
+        <module>tachyon-platforms</module>
         <module>tachyon-minecraft-example</module>
     </modules>
 
@@ -20,7 +19,6 @@
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <protobuf.version>4.33.2</protobuf.version>
         <grpc.version>1.79.0</grpc.version>
     </properties>
 

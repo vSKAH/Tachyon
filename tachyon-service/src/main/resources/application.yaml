@@ -19,6 +19,8 @@ tachyon:
     retention-days: 7
     max-concurrent-uploads: 10
     throttle-seconds: 300
+  warmup:
+    duration: 30
 
 quarkus:
   http:

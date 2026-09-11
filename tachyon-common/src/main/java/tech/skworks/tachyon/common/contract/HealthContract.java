@@ -3,7 +3,6 @@ package tech.skworks.tachyon.common.contract;
 
 import io.grpc.MethodDescriptor;
 import org.bson.RawBsonDocument;
-import tech.skworks.tachyon.common.contract.util.ContractCreator;
 
 /**
  * Short class explaination
@@ -17,15 +16,11 @@ import tech.skworks.tachyon.common.contract.util.ContractCreator;
  * @version 1.0
  * @since 2.0.0-SNAPSHOT
  */
-public class HealthContract extends ContractCreator {
+public class HealthContract extends AbstractContractCreator {
 
     public static final String SERVICE_NAME = "tech.skworks.tachyon.common.contract.HealthService";
 
-    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> PING_METHOD = createMethod(SERVICE_NAME,"Ping");
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> PING_METHOD = createUnaryMethod(SERVICE_NAME,"Ping", BSON_MARSHALLER);
 
-    private HealthContract() {
-        throw new RuntimeException("Unable to instantiate HealthContract");
-    }
-
-
+    private HealthContract() {}
 }
