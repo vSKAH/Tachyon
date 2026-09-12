@@ -1,5 +1,9 @@
 package tech.skworks.tachyon.plugin.core.grpc;
 
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.jetbrains.annotations.NotNull;
+
 import java.time.Duration;
 
 /**
@@ -26,8 +30,6 @@ public class GrpcClientConfig {
     private boolean keepAliveWithoutCalls = true;
 
     private int maxInboundMessageSize = 32 * 1024 * 1024;
-    private boolean retryEnabled = true;
-    private int maxRetryAttempts = 3;
     private String loadBalancingPolicy = "round_robin";
 
     private boolean useVirtualThreads = true;
@@ -68,17 +70,54 @@ public class GrpcClientConfig {
         return this;
     }
 
-    public GrpcClientConfig setRetry(boolean enabled, int maxAttempts) {
-        this.retryEnabled = enabled;
-        this.maxRetryAttempts = maxAttempts;
+    public GrpcClientConfig setLoadBalancingPolicy(String loadBalancingPolicy) {
+        this.loadBalancingPolicy = loadBalancingPolicy;
         return this;
     }
 
-    public GrpcClientConfig setUseVirtualThreads(boolean useVirtualThreads) {
+    public void setUseVirtualThreads(boolean useVirtualThreads) {
         this.useVirtualThreads = useVirtualThreads;
-        return this;
     }
 
+    public static GrpcClientConfig fromFile(@NotNull final FileConfiguration fileConfiguration) {
+        final var config = new GrpcClientConfig();
+        final ConfigurationSection section = fileConfiguration.getConfigurationSection("grpc");
+        if (section == null) {
+            return config;
+        }
+
+        final String target = section.getString("target", null);
+        if (target != null && !target.isBlank()) {
+            config.setTarget(target);
+        } else {
+            config.setAddress(
+                    section.getString("host", "127.0.0.1"),
+                    section.getInt("port", 9000)
+            );
+        }
+
+        config.useTLS(section.getBoolean("use-tls", false));
+
+        final long keepAliveTimeSec = section.getLong("keep-alive.time", 30L);
+        final long keepAliveTimeoutSec = section.getLong("keep-alive.timeout", 5L);
+        final boolean keepAliveWithoutCalls = section.getBoolean("keep-alive.without-calls", true);
+        config.setKeepAlive(
+                Duration.ofSeconds(keepAliveTimeSec),
+                Duration.ofSeconds(keepAliveTimeoutSec),
+                keepAliveWithoutCalls
+        );
+
+        final int maxInboundMb = section.getInt("max-inbound-message-size-mb", 32);
+        config.setMaxInboundMessageSize(maxInboundMb * 1024 * 1024);
+
+        final String lbPolicy = section.getString("load-balancing-policy", "round_robin");
+        config.setLoadBalancingPolicy(lbPolicy);
+
+        final boolean useVirtualThreads = section.getBoolean("use-virtual-threads", true);
+        config.setUseVirtualThreads(useVirtualThreads);
+
+        return config;
+    }
 
     public String getTarget() {
         return target;
@@ -110,14 +149,6 @@ public class GrpcClientConfig {
 
     public int getMaxInboundMessageSize() {
         return maxInboundMessageSize;
-    }
-
-    public boolean isRetryEnabled() {
-        return retryEnabled;
-    }
-
-    public int getMaxRetryAttempts() {
-        return maxRetryAttempts;
     }
 
     public String getLoadBalancingPolicy() {

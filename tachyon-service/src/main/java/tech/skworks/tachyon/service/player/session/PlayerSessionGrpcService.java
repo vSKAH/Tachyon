@@ -7,15 +7,22 @@ import io.grpc.stub.ServerCalls;
 import io.quarkus.grpc.GrpcService;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
+import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.smallrye.common.annotation.NonBlocking;
+import io.smallrye.common.constraint.NotNull;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
+import io.vertx.redis.client.Command;
+import jakarta.annotation.PostConstruct;
 import jakarta.inject.Inject;
+import org.bson.BsonValue;
 import org.bson.RawBsonDocument;
 import org.jboss.logging.Logger;
 import tech.skworks.tachyon.common.contract.PlayerSessionContract;
 import tech.skworks.tachyon.common.types.Empty;
-import tech.skworks.tachyon.service.infra.RedisKeys;
+import tech.skworks.tachyon.service.util.RedisKeys;
+
+import java.util.ArrayList;
 
 /**
  * Project Tachyon
@@ -33,54 +40,15 @@ public class PlayerSessionGrpcService implements BindableService {
     @Inject
     Logger log;
 
-    private final ReactiveKeyCommands<String> redisKey;
+    @Inject
+    ReactiveRedisDataSource redis;
 
-    public PlayerSessionGrpcService(ReactiveRedisDataSource redisDS) {
-        this.redisKey = redisDS.key();
-    }
-
-    public Uni<Empty> freePlayer(RawBsonDocument request) {
-        if (!request.containsKey("uuid") || !request.isString("uuid")) {
-            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("'uuid' must be present to release player profile").asRuntimeException());
-        }
-
-        final var uuid = request.getString("uuid").getValue();
-        log.infof("[PlayerDataGrpcService] freePlayer() called for %s — releasing state.", uuid);
-
-        return redisKey.del(RedisKeys.state(uuid))
-                .invoke(deleted -> {
-                    if (deleted != null && deleted > 0) log.infof("[PlayerDataGrpcService] State key deleted for %s.", uuid);
-                    else log.debugf("[PlayerDataGrpcService] No state key found to delete for %s (already free).", uuid);
-        }).replaceWith(Empty.INSTANCE)
-                .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] freePlayer() failed for %s.", uuid))
-                .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Failed to delete state key in Redis!").asRuntimeException());
-    }
+    private ReactiveKeyCommands<String> redisKey;
 
 
-    public Uni<Empty> playerHeartBeatBatch(RawBsonDocument request) {
-        if (!request.containsKey("uuids") || !request.isArray("uuids")) {
-            return Uni.createFrom().item(Empty.INSTANCE);
-        }
-        var uuids = request.getArray("uuids");
-        if (uuids.isEmpty()) return Uni.createFrom().item(Empty.INSTANCE);
-
-        log.debugf("[PlayerDataGrpcService] Heartbeat batch received — renewing TTL for %d player(s).", uuids.size());
-
-        return Multi.createFrom().iterable(uuids)
-                .onItem().transformToUniAndMerge(value -> {
-                    final var playerId = value.asString().getValue();
-                    return redisKey.expire(RedisKeys.state(playerId), RedisKeys.STATE_TTL_SECONDS)
-                            .invoke(exists -> {
-                                if (Boolean.FALSE.equals(exists)) {
-                                    log.debugf("[PlayerDataGrpcService] Heartbeat: state key missing for %s (may be already FREE).", playerId);
-                                }
-                            })
-                            .onFailure().recoverWithItem(false);
-                }).collect().asList()
-                .replaceWith(Empty.INSTANCE)
-                .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] Heartbeat batch completely failed."))
-                .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Heartbeat batch failed: " + e.getMessage()).asRuntimeException());
-
+    @PostConstruct
+    void init() {
+        this.redisKey = redis.key();
     }
 
     @Override
@@ -103,4 +71,45 @@ public class PlayerSessionGrpcService implements BindableService {
 
                 .build();
     }
+
+    public Uni<Empty> playerHeartBeatBatch(@NotNull final RawBsonDocument request) {
+        if (!request.containsKey("uuids") || !request.isArray("uuids")) {
+            return Uni.createFrom().item(Empty.INSTANCE);
+        }
+        var uuids = request.getArray("uuids");
+        if (uuids.isEmpty()) return Uni.createFrom().item(Empty.INSTANCE);
+
+        final var stateKeys = new ArrayList<String>(uuids.size() + 3);
+        stateKeys.add(PlayerSessionUtils.HEARTBEAT_BATCH_LUA);
+        stateKeys.add(String.valueOf(uuids.size()));
+        for (var uuid : uuids) {
+            stateKeys.add(RedisKeys.state(uuid.asString().getValue()));
+        }
+        stateKeys.add(String.valueOf(RedisKeys.STATE_TTL_SECONDS));
+
+        return redis.execute(Command.EVAL, stateKeys.toArray(String[]::new))
+                .invoke(() -> log.debugf("[PlayerDataGrpcService] Heartbeat batch processed for %d player(s).", uuids.size()))
+                .replaceWith(Empty.INSTANCE)
+                .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] Heartbeat batch completely failed."))
+                .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Heartbeat batch failed: " + e.getMessage()).asRuntimeException());
+
+    }
+
+    public Uni<Empty> freePlayer(@NotNull final RawBsonDocument request) {
+        if (!request.containsKey("uuid") || !request.isString("uuid")) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("'uuid' must be present to release player profile").asRuntimeException());
+        }
+
+        final var uuid = request.getString("uuid").getValue();
+        log.infof("[PlayerDataGrpcService] freePlayer() called for %s — releasing state.", uuid);
+
+        return redisKey.del(RedisKeys.state(uuid))
+                .invoke(deleted -> {
+                    if (deleted != null && deleted > 0) log.infof("[PlayerDataGrpcService] State key deleted for %s.", uuid);
+                    else log.debugf("[PlayerDataGrpcService] No state key found to delete for %s (already free).", uuid);
+                }).replaceWith(Empty.INSTANCE)
+                .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] freePlayer() failed for %s.", uuid))
+                .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Failed to delete state key in Redis!").asRuntimeException());
+    }
+
 }

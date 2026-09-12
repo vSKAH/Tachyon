@@ -42,6 +42,7 @@ public class ConnectionListener implements Listener {
 
         if (!plugin.getHealthService().isHealthy()) {
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, "Tachyon back-end is currently unreachable ! Please contact an administrator");
+            return;
         }
 
         final UUID uuid = event.getUniqueId();
@@ -120,6 +121,8 @@ public class ConnectionListener implements Listener {
             } else {
                 LOGGER.info("saveProfile() confirmed for {} ({}).", player.getName(), uuid);
             }
+
+            //TODO: add to dlq if failed
             profilesRegistry.unloadProfile(uuid, "DISCONNECT");
             plugin.getPlayerSessionService().unlockPlayerProfile(uuid, player.getName());
         });

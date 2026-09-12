@@ -21,78 +21,71 @@ public class TachyonProfileImpl implements TachyonProfile {
     private final UUID uuid;
     private final ComponentRegistry registry;
 
-    private final Map<Class<? extends Record>, Record> components = new ConcurrentHashMap<>();
-    private final Set<Class<? extends Record>> deleted = ConcurrentHashMap.newKeySet();
+    private final Map<ComponentNamespace, Record> components = new ConcurrentHashMap<>();
+    private final Set<ComponentNamespace> deleted = ConcurrentHashMap.newKeySet();
 
-    private final Map<Class<? extends Record>, Long> versions = new ConcurrentHashMap<>();
-    private final Map<Class<? extends Record>, Long> sentVersions = new ConcurrentHashMap<>();
+    private final Map<ComponentNamespace, Long> versions = new ConcurrentHashMap<>();
+    private final Map<ComponentNamespace, Long> sentVersions = new ConcurrentHashMap<>();
 
     public TachyonProfileImpl(UUID uuid, ComponentRegistry registry) {
         this.uuid = uuid;
         this.registry = registry;
     }
 
-    public <T extends Record> void initComponent(@NotNull final T component, final long version) {
-        components.put(component.getClass(), component);
-        versions.put(component.getClass(), version);
-        sentVersions.put(component.getClass(), version);
+    public <T extends Record> void initComponent(@NotNull final ComponentNamespace namespace, @NotNull final T component, final long version) {
+        components.put(namespace, component);
+        versions.put(namespace, version);
+        sentVersions.put(namespace, version);
     }
 
-    public <T extends Record> void initComponent(@NotNull final T component) {
-        initComponent(component, 1L);
-    }
-
-    @Override
-    public <T extends Record> void setComponent(@NotNull T component) {
-        components.put(component.getClass(), component);
-        versions.merge(component.getClass(), 1L, Long::sum);
+    public <T extends Record> void initComponent(@NotNull final ComponentNamespace namespace, @NotNull final T component) {
+        initComponent(namespace, component, 1L);
     }
 
     @Override
-    public <T extends Record> void updateComponent(@NotNull final Class<T> clazz, @NotNull final UnaryOperator<T> modifier) {
-        Record updated = components.computeIfPresent(clazz, (k, current) -> {
-            T typed = clazz.cast(current);
-            return modifier.apply(typed);
-        });
+    public <T extends Record> void setComponent(@NotNull final ComponentNamespace namespace, @NotNull T component) {
+        components.put(namespace, component);
+        versions.merge(namespace, 1L, Long::sum);
+    }
+
+    @Override
+    public <T extends Record> void updateComponent(@NotNull final ComponentNamespace componentNamespace, @NotNull final Class<T> clazz, @NotNull final UnaryOperator<T> modifier) {
+        Record updated = components.computeIfPresent(componentNamespace, (_, current) -> modifier.apply(clazz.cast(current)));
         if (updated != null) {
-            versions.merge(clazz, 1L, Long::sum);
+            versions.merge(componentNamespace, 1L, Long::sum);
         }
     }
 
     @Override
-    public <T extends Record> T getComponent(@NotNull final Class<T> clazz, @NotNull final T defaultValue) {
-        T value = getComponent(clazz);
+    public <T extends Record> T getComponent(@NotNull final ComponentNamespace componentNamespace, @NotNull final T defaultValue) {
+        T value = getComponent(componentNamespace);
         if (value != null) {
             return value;
         }
-        setComponent(defaultValue);
+        setComponent(componentNamespace, defaultValue);
         return defaultValue;
     }
 
     @Override
     @SuppressWarnings("unchecked")
-    public @Nullable <T extends Record> T getComponent(@NotNull final Class<T> clazz) {
-        Record component = components.get(clazz);
+    public @Nullable <T extends Record> T getComponent(@NotNull final ComponentNamespace componentNamespace) {
+        Record component = components.get(componentNamespace);
         if (component == null) return null;
-        if (clazz.isInstance(component)) {
-            return (T) component;
-        }
-        return null;
+        return (T) component;
     }
 
     @Override
-    public <T extends Record> void removeComponent(@NotNull Class<T> clazz) {
-        components.remove(clazz);
-        versions.merge(clazz, 1L, Long::sum);
-        sentVersions.remove(clazz);
-        deleted.add(clazz);
+    public void removeComponent(@NotNull final ComponentNamespace componentNamespace) {
+        components.remove(componentNamespace);
+        versions.merge(componentNamespace, 1L, Long::sum);
+        deleted.add(componentNamespace);
     }
 
     @Override
     public boolean hasPendingChanges() {
         if (!deleted.isEmpty()) return true;
-        for (Map.Entry<Class<? extends Record>, Long> entry : versions.entrySet()) {
-            Long lastSent = sentVersions.get(entry.getKey());
+        for (final var entry : versions.entrySet()) {
+            final var lastSent = sentVersions.get(entry.getKey());
             if (!Objects.equals(entry.getValue(), lastSent)) {
                 return true;
             }
@@ -104,30 +97,30 @@ public class TachyonProfileImpl implements TachyonProfile {
     public @NotNull Map<ComponentNamespace, BsonDocument> extractDirtyComponents() {
         Map<ComponentNamespace, BsonDocument> dirtyMap = new HashMap<>();
 
-        for (final Map.Entry<Class<? extends Record>, Long> entry : versions.entrySet()) {
-            final Class<? extends Record> clazz = entry.getKey();
-            final Long currentVersion = entry.getValue();
-            final Long lastSentVersion = sentVersions.get(clazz);
+        for (final Map.Entry<ComponentNamespace, Long> entry : versions.entrySet()) {
+            final var componentNamespace = entry.getKey();
+            final var currentVersion = entry.getValue();
+            final var lastSentVersion = sentVersions.get(componentNamespace);
 
             if (Objects.equals(currentVersion, lastSentVersion)) {
                 continue;
             }
 
-            final Record component = components.get(clazz);
+            final Record component = components.get(componentNamespace);
             if (component == null) {
-                versions.remove(clazz, currentVersion);
+                //versions.remove(clazz, currentVersion);
                 continue;
             }
 
-            ComponentCodec<?> codec = registry.getCodec(clazz);
+            ComponentCodec<?> codec = registry.getCodec(componentNamespace);
             if (codec == null) {
-                LOGGER.warn("'extractDirtyComponents' No codec found for component {} ", clazz.getName());
+                LOGGER.warn("'extractDirtyComponents' No codec found for component {} ", componentNamespace);
                 continue;
             }
 
             BsonDocument encoded = encodeUnchecked(codec, component);
-            dirtyMap.put(codec.getComponentNamespace(), encoded);
-            sentVersions.put(clazz, currentVersion);
+            dirtyMap.put(componentNamespace, encoded);
+          //  sentVersions.put(componentNamespace, currentVersion);
         }
         return dirtyMap;
     }
@@ -140,10 +133,10 @@ public class TachyonProfileImpl implements TachyonProfile {
     @Override
     public @NotNull List<ComponentNamespace> extractDeletedComponents() {
         List<ComponentNamespace> list = new ArrayList<>();
-        for (Class<? extends Record> clazz : deleted) {
-            ComponentCodec<?> codec = registry.getCodec(clazz);
+        for (ComponentNamespace namespace : deleted) {
+            ComponentCodec<?> codec = registry.getCodec(namespace);
             if (codec == null) {
-                LOGGER.warn("'extractDeletedComponents' No codec found for component {} ", clazz.getName());
+                LOGGER.warn("'extractDeletedComponents' No codec found for component {} ", namespace);
                 continue;
             }
             list.add(codec.getComponentNamespace());
@@ -152,16 +145,24 @@ public class TachyonProfileImpl implements TachyonProfile {
     }
 
     @Override
-    public void markAsClean(@NotNull final Collection<Class<? extends Record>> savedClasses, @NotNull final Collection<ComponentNamespace> deletedNames) {
-        for (ComponentNamespace deletedName : deletedNames) {
+    public void markAsClean(@NotNull final Map<ComponentNamespace, Long> confirmedVersions, @NotNull final Collection<ComponentNamespace> deletedNames) {
 
-            ComponentCodec<?> codec = registry.getCodec(deletedName);
-            if (codec == null) {
-                LOGGER.warn("'markAsClean' No codec found for component {} ", deletedName);
-                continue;
+        for (final var confirmedVersionsEntry : confirmedVersions.entrySet()) {
+            final var namespace = confirmedVersionsEntry.getKey();
+            final var codec = registry.getCodec(namespace);
+            if (codec != null) {
+                final var versionSent = confirmedVersionsEntry.getValue();
+                sentVersions.compute(namespace, (_, currentSent) -> currentSent == null ? versionSent : Math.max(currentSent, versionSent));
             }
+        }
 
-            deleted.remove(codec.getComponentClass());
+        for (final var componentNamespace : deletedNames) {
+            final var codec = registry.getCodec(componentNamespace);
+            if (codec != null) {
+                if (!components.containsKey(componentNamespace)) {
+                    deleted.remove(componentNamespace);
+                }
+            }
         }
 
     }
@@ -171,12 +172,8 @@ public class TachyonProfileImpl implements TachyonProfile {
         return uuid;
     }
 
-    public Long getVersion(@NotNull final Class<? extends Record> clazz) {
-        return versions.getOrDefault(clazz, 1L);
-    }
-
     public Long getVersion(@NotNull final ComponentNamespace namespace) {
         ComponentCodec<?> codec = registry.getCodec(namespace);
-        return codec != null ? getVersion(codec.getComponentClass()) : 1L;
+        return codec != null ? versions.getOrDefault(namespace, 1L) : 1L;
     }
 }

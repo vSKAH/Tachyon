@@ -95,7 +95,7 @@ public class TachyonProfileRegistryImpl implements TachyonProfileRegistry {
 
             try {
                 final var component = componentCodec.decode(componentBson);
-                profile.initComponent(component, version);
+                profile.initComponent(ComponentNamespace.parse(componentName), component, version);
                 loaded++;
             } catch (Exception e) {
                 LOGGER.error("Failed to load component {} for player.", componentName, uuid);

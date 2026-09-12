@@ -56,9 +56,10 @@ public class SnapshotCommand implements TabExecutor {
     private <T extends Record> T fetchComponentByName(@NotNull UUID uuid, @NotNull String componentName) {
         final TachyonProfile profile = tachyonCore.getTachyonProfileRegistry().getProfile(uuid);
         if (profile == null) return null;
-        ComponentCodec<?> codec = tachyonCore.getComponentRegistry().getCodec(ComponentNamespace.parse(componentName));
+        final var componentNamespace = ComponentNamespace.parse(componentName);
+        ComponentCodec<?> codec = tachyonCore.getComponentRegistry().getCodec(componentNamespace);
         if (codec == null) return null;
-        return (T) profile.getComponent(codec.getComponentClass());
+        return (T) profile.getComponent(componentNamespace);
     }
 
     private @Nullable OfflinePlayer getOfflinePlayer(@NotNull final String targetName) {

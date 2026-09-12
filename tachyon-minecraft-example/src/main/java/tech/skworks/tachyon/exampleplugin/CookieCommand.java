@@ -42,13 +42,13 @@ public class CookieCommand implements CommandExecutor {
         }
 
         // Get the cookie component. If the profile doesn't have it, provide a default value
-        CookieComponent component = profile.getComponent(CookieComponent.class, new CookieComponent(0));
+        CookieComponent component = profile.getComponent(CookieComponent.CookieComponentCodec.NAMESPACE, new CookieComponent(0));
 
         if (args.length == 1 && args[0].equalsIgnoreCase("click")) {
             long newCookiesAmount = component.cookiesAmount() + 1;
 
             //Update the component
-            profile.updateComponent(CookieComponent.class, (value) -> value.toBuilder().cookiesAmount(newCookiesAmount).build());
+            profile.updateComponent(CookieComponent.CookieComponentCodec.NAMESPACE, CookieComponent.class, (value) -> value.toBuilder().cookiesAmount(newCookiesAmount).build());
 
             tachyon.getAuditService().log(AuditEntry.of(playerId, "COOKIE_MODULE", "GAIN_COOKIES", "+1"));
             player.sendMessage("§6+1 Cookie ! §e(Total : " + newCookiesAmount + ")");

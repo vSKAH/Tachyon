@@ -134,43 +134,6 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
         }
     }
 
-    /**
-     * Root Document :
-     * -> Save Document "save" :
-     *      NameSpaceKey : Data
-     * -> Version document "versions" :
-     *      NameSpaceKey : Int64 version
-     * -> Remove Array "remove" :
-     *      NameSpaceKey
-     */
-
-    private BsonDocument buildPushDocument(@NotNull final TachyonProfile tachyonProfile) {
-        final UUID uuid = tachyonProfile.getUuid();
-        final String strUuid = uuid.toString();
-
-        final BsonDocument rootDocument = new BsonDocument("uuid", new BsonString(strUuid));
-
-        final BsonDocument saveDocument = new BsonDocument();
-        final BsonDocument versionsDocument = new BsonDocument();
-
-        Map<ComponentNamespace, BsonDocument> dirty = Map.copyOf(tachyonProfile.extractDirtyComponents());
-        dirty.forEach((namespace, document) -> {
-            final var namespaceKey = namespace.toString();
-            saveDocument.append(namespaceKey, document);
-            versionsDocument.append(namespaceKey, new BsonInt64(tachyonProfile.getVersion(namespace)));
-        });
-        rootDocument.append("save", saveDocument);
-        rootDocument.append("versions", versionsDocument);
-
-        BsonArray removeArray = new BsonArray();
-        tachyonProfile.extractDeletedComponents().forEach(name -> {
-            removeArray.add(new BsonString(name.toString()));
-            versionsDocument.append(name.toString(), new BsonInt64(tachyonProfile.getVersion(name)));
-        });
-        rootDocument.append("remove", removeArray);
-
-        return rootDocument;
-    }
 
     public @NotNull CompletableFuture<Void> pushProfile(@NotNull final TachyonProfile tachyonProfile) {
         final var uuid = tachyonProfile.getUuid();
@@ -185,8 +148,7 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
             if (currentInFlight == null || currentInFlight.isDone()) {
                 nextSave = executePush(tachyonProfile);
             } else {
-                nextSave = currentInFlight.handle((_, _) -> null)
-                        .thenCompose(_ -> executePush(tachyonProfile));
+                nextSave = currentInFlight.handle((_, _) -> null).thenCompose(_ -> executePush(tachyonProfile));
             }
 
             nextSave.whenComplete((_, _) -> inFlightSaves.remove(uuid, nextSave));
@@ -199,21 +161,69 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
             return CompletableFuture.completedFuture(null);
         }
 
-        final UUID uuid = tachyonProfile.getUuid();
-        final RawBsonDocument document = BsonUtil.toRawBsonDocument(buildPushDocument(tachyonProfile));
+        final var uuid = tachyonProfile.getUuid();
+        final PushPayload payload = buildPushDocument(tachyonProfile);
+
+        if (payload.snapshotVersions.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
 
         return asyncRun(vThreadExecutor, LOGGER, "SaveProfile", () -> {
             ClientCalls.blockingUnaryCall(
                     grpcClient.getChannel(),
                     PlayerDataContract.PUSH_PROFILE_METHOD,
                     CallOptions.DEFAULT.withDeadlineAfter(2, TimeUnit.SECONDS),
-                    document
+                    payload.document
             );
-        }).exceptionally(throwable -> {
-            LOGGER.warn("Save profile failed for {} ({}) — routing to local recovery store.", uuid, throwable.getMessage());
-            //TODO: DLQ
-            return null;
+        }).whenComplete((_, throwable) -> {
+            if (throwable == null) {
+                tachyonProfile.markAsClean(payload.snapshotVersions(), payload.deletedNames());
+            } else {
+                LOGGER.warn("Save profile failed for {} ({}) — routing to local recovery store.", uuid, throwable.getMessage());
+                //TODO: DLQ
+            }
         });
+    }
+
+    private record PushPayload(RawBsonDocument document, Map<ComponentNamespace, Long> snapshotVersions, List<ComponentNamespace> deletedNames) {}
+
+    private @NotNull PushPayload buildPushDocument(@NotNull final TachyonProfile tachyonProfile) {
+        final var uuid = tachyonProfile.getUuid();
+        final var strUuid = uuid.toString();
+
+        final var rootDocument = new BsonDocument("uuid", new BsonString(strUuid));
+        final var saveDocument = new BsonDocument();
+        final var versionsDocument = new BsonDocument();
+        final var snapshotVersions = new HashMap<ComponentNamespace, Long>();
+
+        final var dirty = Map.copyOf(tachyonProfile.extractDirtyComponents());
+        dirty.forEach((namespace, document) -> {
+            final var namespaceKey = namespace.toString();
+            final var version = tachyonProfile.getVersion(namespace);
+
+            saveDocument.append(namespaceKey, document);
+            versionsDocument.append(namespaceKey, new BsonInt64(version));
+            snapshotVersions.put(namespace, version);
+        });
+        rootDocument.append("save", saveDocument);
+
+        final var removeArray = new BsonArray();
+        final var deleted = tachyonProfile.extractDeletedComponents();
+
+        deleted.forEach(name -> {
+            final var namespaceKey = name.fullNamespace();
+            long version = tachyonProfile.getVersion(name);
+
+            removeArray.add(new BsonString(namespaceKey));
+            versionsDocument.append(namespaceKey, new BsonInt64(version));
+            snapshotVersions.put(name, version);
+        });
+
+        rootDocument.append("remove", removeArray);
+        rootDocument.append("versions", versionsDocument);
+
+
+        return new PushPayload(BsonUtil.toRawBsonDocument(rootDocument), snapshotVersions, deleted);
     }
 
     @Override

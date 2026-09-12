@@ -38,7 +38,7 @@ public interface TachyonProfile {
      * @param component The new Protobuf component instance to store.
      * @param <T>       The specific type of the Protobuf message.
      */
-    <T extends Record> void setComponent(@NotNull final T component);
+    <T extends Record> void setComponent(@NotNull final ComponentNamespace componentNamespace, @NotNull final T component);
 
     /**
      * Convenience method to safely update an existing Record component using its Builder.
@@ -50,7 +50,7 @@ public interface TachyonProfile {
      * @param modifier  A function taking the current Record instance and returning a new updated Record instance.
      * @param <T>      The specific record comportnent type
      */
-    <T extends Record> void updateComponent(@NotNull final Class<T> clazz, @NotNull final UnaryOperator<T> modifier);
+    <T extends Record> void updateComponent(@NotNull final ComponentNamespace componentNamespace, @NotNull final Class<T> clazz, @NotNull final UnaryOperator<T> modifier);
 
     /**
      * Retrieves a component by its class type, returning a fallback value if it is not found.
@@ -60,7 +60,7 @@ public interface TachyonProfile {
      * @param <T>          The specific type of the Protobuf message.
      * @return The current component instance, or the provided default value.
      */
-    <T extends Record> T getComponent(@NotNull final Class<T> clazz, @NotNull final T defaultValue);
+    <T extends Record> T getComponent(@NotNull final ComponentNamespace componentNamespace, @NotNull final T defaultValue);
 
     /**
      * Retrieves a component by its class type.
@@ -69,10 +69,10 @@ public interface TachyonProfile {
      * @param <T>   The specific type of the Protobuf message.
      * @return The current component instance, or {@code null} if not found.
      */
-    @Nullable <T extends Record> T getComponent(@NotNull final Class<T> clazz);
+    @Nullable <T extends Record> T getComponent(@NotNull final ComponentNamespace componentNamespace);
 
 
-    <T extends Record> void removeComponent(@NotNull final Class<T> clazz);
+    void removeComponent(@NotNull final ComponentNamespace componentNamespace);
 
     boolean hasPendingChanges();
 
@@ -80,15 +80,13 @@ public interface TachyonProfile {
 
     @NotNull List<ComponentNamespace> extractDeletedComponents();
 
-    void markAsClean(@NotNull final Collection<Class<? extends Record>> savedClasses, @NotNull final Collection<ComponentNamespace> deletedComponent);
+    void markAsClean(@NotNull final Map<ComponentNamespace, Long> savedClasses, @NotNull final Collection<ComponentNamespace> deletedComponent);
     /**
      * Gets the unique identifier of the player who owns this profile.
      *
      * @return The player's UUID.
      */
     UUID getUuid();
-
-    Long getVersion(@NotNull final Class<? extends Record> clazz);
 
     Long getVersion(@NotNull final ComponentNamespace namespace);
 }

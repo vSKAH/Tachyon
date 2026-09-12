@@ -3,6 +3,7 @@ package tech.skworks.tachyon.service.infra.health;
 import io.quarkus.runtime.StartupEvent;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.infrastructure.Infrastructure;
+import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -23,6 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * @version 1.0
  * @since 2.0.0-alpha.2
  */
+@ApplicationScoped
 public class TachyonWarmupService {
 
     @Inject

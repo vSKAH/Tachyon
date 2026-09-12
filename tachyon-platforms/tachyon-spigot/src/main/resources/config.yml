@@ -1,32 +1,93 @@
-server-name: "hello"
+# ==============================================================================
+#                      Tachyon Spigot Core Configuration
+# ==============================================================================
+
+# Unique server identifier across the Tachyon network cluster.
+# Used for session heartbeats, audits, and metric tagging.
+server-name: "lobby-01"
+
+# ------------------------------------------------------------------------------
+# gRPC Client Configuration
+# ------------------------------------------------------------------------------
+# Connects this Spigot instance to the Tachyon Quarkus backend service.
 grpc:
-  host: "localhost"
+  # The IP address or hostname of the Tachyon gRPC backend service.
+  host: "127.0.0.1"
+
+  # The port of the Tachyon gRPC backend service (default: 9000).
   port: 9000
+
+  # If specified and non-empty, this overrides 'host' and 'port'.
+  # target: "dns:///tachyon-backend:9000"
+
+  # Whether to use TLS encryption for gRPC transport.
+  use-tls: false
+
+  keep-alive:
+    # Time (in seconds) between keep-alive pings.
+    time: 30
+    # Timeout (in seconds) waiting for keep-alive ping acknowledgment.
+    timeout: 5
+    # Whether to send keep-alive pings even when there are no active RPC calls.
+    without-calls: true
+
+  # Maximum inbound gRPC message size in Megabytes (BSON documents / snapshots).
+  max-inbound-message-size-mb: 32
+
+  # Client-side load balancing policy ('round_robin' or 'pick_first').
+  load-balancing-policy: "round_robin"
+
+  # Use Java Virtual Threads for gRPC transport and callback handling.
+  use-virtual-threads: true
+
+# ------------------------------------------------------------------------------
+# Prometheus Metrics Server Configuration
+# ------------------------------------------------------------------------------
 metrics:
+  # Host IP to bind the embedded HTTP Prometheus scraper.
   host: "0.0.0.0"
+  # Port to expose Prometheus metrics.
   port: 9001
+
+# ------------------------------------------------------------------------------
+# Tachyon Services Configuration
+# ------------------------------------------------------------------------------
 services:
+  # Audit Log Service (High-throughput event auditing)
   audit:
     buffer:
+      # Capacity of the concurrent ring buffer holding pending audit logs before flush.
       size: 5000
+      # Delay (in seconds) between background buffer flush cycles.
       flush_delay: 2
+      # Maximum number of audit events to drain per flush cycle.
       drain_per_cycle: 200
     logs:
       login:
         enabled: true
       logout:
         enabled: true
+
+  # Player Session Service (Heartbeat & Presence)
   session:
     heartbeat:
+      # Interval (in seconds) between session heartbeats sent to the backend.
       send_delay: 5
-      logs: true
+      # Whether to log heartbeat transmissions in console debug.
+      logs: false
+
+  # Player Data Service (Profiles, Persistence & Resilience)
   player-data:
     load:
       attempts:
+        # Maximum attempts to pull player data before failing.
         max: 5
-        delay: 500 #ms
+        # Delay (in milliseconds) between pull retries (handled with Resilience4j).
+        delay: 500
+      # Kick message shown to players when their profile fails to load.
       kick_msg: "§c[Tachyon] Failed to load your data. Please reconnect."
     auto-save:
+      # Enable periodic automatic profile flushing.
       enabled: true
-      delay: 10 #sec
-      max-per-tick: 20 # max profiles flushed per auto-save cycle to avoid spamming the backend (<= 0 = unlimited)
+      # Interval (in seconds) between auto-save cycles.
+      delay: 10

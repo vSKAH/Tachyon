@@ -19,6 +19,7 @@ import io.quarkus.redis.datasource.value.SetArgs;
 import io.smallrye.common.annotation.NonBlocking;
 import io.smallrye.common.constraint.NotNull;
 import io.smallrye.mutiny.Uni;
+import io.vertx.redis.client.Command;
 import jakarta.annotation.PostConstruct;
 import jakarta.inject.Inject;
 import org.bson.BsonDocument;
@@ -30,7 +31,7 @@ import org.jboss.logging.Logger;
 import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
 import tech.skworks.tachyon.common.types.Empty;
-import tech.skworks.tachyon.service.infra.RedisKeys;
+import tech.skworks.tachyon.service.util.RedisKeys;
 import tech.skworks.tachyon.service.infra.health.TachyonWarmupService;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
@@ -47,6 +48,10 @@ import java.util.Objects;
 @NonBlocking
 public class PlayerDataGrpcService implements BindableService {
 
+    private static final XAddArgs STREAM_ARGS = new XAddArgs().maxlen(50000L).nearlyExactTrimming();
+    private static final Bson PULL_PROFILE_PROJECTION = Projections.fields(Projections.include(PlayerDataContract.FIELD_UUID, PlayerDataContract.FIELD_COMPONENTS, PlayerDataContract.FIELD_VERSIONS), Projections.excludeId());
+    public static final FindOptions PULL_PROFILE_FIND_OPTIONS = new FindOptions().projection(PlayerDataGrpcService.PULL_PROFILE_PROJECTION);
+
     @Inject
     Logger log;
     @Inject
@@ -59,28 +64,22 @@ public class PlayerDataGrpcService implements BindableService {
     String dbName;
     @Inject
     ReactiveMongoClient mongoClient;
+    @Inject
+    ReactiveRedisDataSource redis;
 
     private ReactiveMongoCollection<RawBsonDocument> playersCollection;
 
-    private static final XAddArgs STREAM_ARGS = new XAddArgs().maxlen(50000L).nearlyExactTrimming();
-    private final ReactiveValueCommands<String, String> redisString;
-    private final ReactiveValueCommands<String, byte[]> redisBytes;
-    private final ReactiveStreamCommands<String, String, byte[]> redisStream;
-    private final ReactiveKeyCommands<String> redisKey;
-
-    private static final Bson PULL_PROFILE_PROJECTION = Projections.fields(Projections.include(PlayerDataContract.FIELD_UUID, PlayerDataContract.FIELD_COMPONENTS, PlayerDataContract.FIELD_VERSIONS), Projections.excludeId());
-    public static final FindOptions PULL_PROFILE_FIND_OPTIONS = new FindOptions().projection(PlayerDataGrpcService.PULL_PROFILE_PROJECTION);
-
-
-    public PlayerDataGrpcService(ReactiveRedisDataSource redisDS) {
-        this.redisString = redisDS.value(String.class);
-        this.redisBytes = redisDS.value(byte[].class);
-        this.redisStream = redisDS.stream(String.class, String.class, byte[].class);
-        this.redisKey = redisDS.key();
-    }
+    private ReactiveValueCommands<String, String> redisString;
+    private ReactiveValueCommands<String, byte[]> redisBytes;
+    private ReactiveStreamCommands<String, String, byte[]> redisStream;
+    private ReactiveKeyCommands<String> redisKey;
 
     @PostConstruct
     void init() {
+        this.redisString = redis.value(String.class);
+        this.redisBytes = redis.value(byte[].class);
+        this.redisStream = redis.stream(String.class, String.class, byte[].class);
+        this.redisKey = redis.key();
         this.playersCollection = mongoClient.getDatabase(dbName).getCollection(config.collection(), RawBsonDocument.class);
     }
 
@@ -121,28 +120,26 @@ public class PlayerDataGrpcService implements BindableService {
             long remainingSec = (warmupService.getRemainingWarmupMs() / 1000) + 1;
             log.infof("[PlayerDataGrpcService] pullProfile(%s) BLOCKED — Backend is in warm-up (%ds remaining).", uuid, remainingSec);
 
-            return Uni.createFrom().failure(Status.ABORTED
-                    .withDescription("BACKEND_WARMUP: Recovery in progress. Retry in " + remainingSec + " seconds").asRuntimeException());
+            return Uni.createFrom().failure(Status.ABORTED.withDescription("BACKEND_WARMUP: Recovery in progress. Retry in " + remainingSec + " seconds").asRuntimeException());
         }
 
-        final var dirtyKey = RedisKeys.dirty(uuid);
+        final var dirtyKey = PlayerDataUtils.dirty(uuid);
         final var stateKey = RedisKeys.state(uuid);
         final var cacheKey = RedisKeys.cache(uuid);
 
         log.debugf("[PlayerDataGrpcService] pullProfile() called for %s.", uuid);
 
-        return redisString.get(dirtyKey).chain(dirty -> {
-            if (dirty != null) {
+        //TODO: uses lua to acquire player
+        return redisKey.exists(dirtyKey).chain(isDirty -> {
+            if (isDirty) {
                 log.infof("[PlayerDataGrpcService] pullProfile() for %s blocked — DATA_DIRTY (save in progress).", uuid);
-                return Uni.createFrom().failure(Status.ABORTED
-                        .withDescription("DATA_DIRTY: Player data is currently being saved (Player: " + uuid + " )").asRuntimeException());
+                return Uni.createFrom().failure(Status.ABORTED.withDescription("DATA_DIRTY: Player data is currently being saved (Player: " + uuid + " )").asRuntimeException());
             }
 
             return redisString.setAndChanged(stateKey, "USED", new SetArgs().nx().ex(RedisKeys.STATE_TTL_SECONDS)).chain(acquired -> {
                 if (!acquired) {
                     log.infof("[PlayerDataGrpcService] pullProfile() for %s blocked — ALREADY_LOADED (active on another server).", uuid);
-                    return Uni.createFrom().failure(Status.ABORTED.
-                            withDescription("ALREADY_LOADED:Player data is currently active on another server (Player: " + uuid + " )").asRuntimeException());
+                    return Uni.createFrom().failure(Status.ABORTED.withDescription("ALREADY_LOADED: Player data is currently active on another server (Player: " + uuid + " )").asRuntimeException());
                 }
 
                 log.debugf("[PlayerDataGrpcService] State set to USED for %s — checking cache...", uuid);
@@ -156,6 +153,16 @@ public class PlayerDataGrpcService implements BindableService {
                     log.infof("[PlayerDataGrpcService] Cache MISS for %s — reading from MongoDB.", uuid);
                     return readFromMongo(uuid)
                             .chain(response -> {
+
+                                boolean hasData = response.containsKey(PlayerDataContract.FIELD_COMPONENTS)
+                                        && response.isDocument(PlayerDataContract.FIELD_COMPONENTS)
+                                        && !response.getDocument(PlayerDataContract.FIELD_COMPONENTS).isEmpty();
+
+                                if (!hasData) {
+                                    log.infof("[PlayerDataGrpcService] New player %s has no components — skipping cache.", uuid);
+                                    return Uni.createFrom().item(response);
+                                }
+
                                 byte[] bytes = BsonUtil.toByteArray(response);
                                 log.infof("[PlayerDataGrpcService] MongoDB read successful for %s — caching (%d bytes).", uuid, bytes.length);
                                 return redisBytes.setex(cacheKey, RedisKeys.CACHE_TTL_SECONDS, bytes).replaceWith(response);
@@ -180,17 +187,18 @@ public class PlayerDataGrpcService implements BindableService {
         }
 
         final var uuid = requestDocument.getString("uuid").getValue();
-        final var dirtyKey = RedisKeys.dirty(uuid);
+        final var dirtyKey = PlayerDataUtils.dirty(uuid);
         final var requestDocumentBytes = BsonUtil.toByteArray(requestDocument);
 
         log.debugf("[PlayerDataGrpcService] pushProfile() enqueuing save for %s (%d bytes).", uuid, requestDocumentBytes.length);
 
-        return redisString.setex(dirtyKey, RedisKeys.DIRTY_TTL_SECONDS, "1")
+        return redis.execute(Command.EVAL, PlayerDataUtils.DIRTY_INCREMENT_LUA, "1", dirtyKey, String.valueOf(RedisKeys.DIRTY_TTL_SECONDS))
                 .chain(() -> redisStream.xadd(config.streamKey(), STREAM_ARGS, Map.of("save_profile_payload", requestDocumentBytes)))
                 .invoke(id -> log.infof("[PlayerDataGrpcService] saveProfile() enqueued for %s (stream message id: %s).", uuid, id))
                 .replaceWith(Empty.INSTANCE)
-                .onFailure().invoke(exception -> log.errorf(exception, "[PlayerDataGrpcService] saveProfile() failed to enqueue for %s — releasing dirty key.", uuid))
-                .onFailure().call(() -> redisKey.del(dirtyKey));
+                .onFailure().invoke(exception -> log.errorf(exception, "[PlayerDataGrpcService] saveProfile() failed to enqueue for %s — decrement dirty key counter.", uuid))
+                .onFailure().call(() -> redis.execute(Command.EVAL, PlayerDataUtils.DIRTY_DECREMENT_LUA, "1", dirtyKey, String.valueOf(RedisKeys.DIRTY_TTL_SECONDS)))
+                .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Failed to enqueue profile into redis stream").asRuntimeException());
     }
 
     private Uni<RawBsonDocument> readFromMongo(final @NotNull String uuid) {

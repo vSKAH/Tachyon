@@ -1,7 +1,6 @@
 package tech.skworks.tachyon.service.player.data;
 
 import com.mongodb.client.model.*;
-import io.quarkus.mongodb.FindOptions;
 import io.quarkus.mongodb.reactive.ReactiveMongoClient;
 import io.quarkus.mongodb.reactive.ReactiveMongoCollection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
@@ -15,6 +14,7 @@ import io.quarkus.scheduler.Scheduled;
 import io.smallrye.common.constraint.NotNull;
 import io.smallrye.common.constraint.Nullable;
 import io.smallrye.mutiny.Uni;
+import io.vertx.redis.client.Command;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -24,7 +24,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
-import tech.skworks.tachyon.service.infra.RedisKeys;
+import tech.skworks.tachyon.service.util.RedisKeys;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
 import java.time.Duration;
@@ -50,27 +50,28 @@ class PlayerDataStreamWorker {
     ReactiveMongoClient mongo;
 
     @Inject
+    ReactiveRedisDataSource redis;
+
+    @Inject
     PlayerConfig config;
 
     @ConfigProperty(name = "quarkus.mongodb.database", defaultValue = "tachyon")
     String dbName;
 
-    private final ReactiveStreamCommands<String, String, byte[]> redisStream;
-    private final ReactiveValueCommands<String, byte[]> redisBytes;
-    private final ReactiveKeyCommands<String> redisKey;
+    private ReactiveStreamCommands<String, String, byte[]> redisStream;
+    private ReactiveValueCommands<String, byte[]> redisBytes;
     private int reclaimCycle = 0;
 
     private ReactiveMongoCollection<Document> playersCollection;
     private ReactiveMongoCollection<RawBsonDocument> rawPlayersCollection;
 
-    public PlayerDataStreamWorker(ReactiveRedisDataSource redisDS) {
-        this.redisStream = redisDS.stream(String.class, String.class, byte[].class);
-        this.redisBytes = redisDS.value(byte[].class);
-        this.redisKey = redisDS.key();
-    }
 
     @PostConstruct
     void init() {
+
+        this.redisStream = redis.stream(String.class, String.class, byte[].class);
+        this.redisBytes = redis.value(byte[].class);
+
         this.playersCollection = mongo.getDatabase(dbName).getCollection(config.collection());
         this.rawPlayersCollection = mongo.getDatabase(dbName).getCollection(config.collection(), RawBsonDocument.class);
         this.log.infof("[PlayerStreamWorker] Initialized with consumer ID '%s' on stream '%s'.", config.consumerId(), config.streamKey());
@@ -319,7 +320,7 @@ class PlayerDataStreamWorker {
 
         final var uniqueUuids = (uuids instanceof Set<String> set) ? set : new HashSet<>(uuids);
 
-        return rawPlayersCollection.find(Filters.eq(PlayerDataContract.FIELD_UUID, uniqueUuids), PlayerDataGrpcService.PULL_PROFILE_FIND_OPTIONS).collect().asList()
+        return rawPlayersCollection.find(Filters.in(PlayerDataContract.FIELD_UUID, uniqueUuids), PlayerDataGrpcService.PULL_PROFILE_FIND_OPTIONS).collect().asList()
                 .chain(docs -> {
                     final var setExpirationsUni = new ArrayList<Uni<Void>>();
                     for (final RawBsonDocument updatedDocument : docs) {
@@ -332,12 +333,19 @@ class PlayerDataStreamWorker {
                 .onFailure().invoke(e -> log.errorf(e, "[PlayerStreamWorker] Failed to batch update cache for %d player(s).", uniqueUuids.size()))
                 .onFailure().recoverWithNull()
                 .eventually(() -> {
-                    final var dirtyKeys = uniqueUuids.stream().map(RedisKeys::dirty).toList();
+                    final var dirtyKeys = uniqueUuids.stream().map(PlayerDataUtils::dirty).toList();
                     if (dirtyKeys.isEmpty()) {
                         return Uni.createFrom().voidItem();
                     }
 
-                    return redisKey.del(dirtyKeys.toArray(new String[0]))
+                    final var args = new ArrayList<String>(dirtyKeys.size() + 3);
+                    args.add(PlayerDataUtils.DIRTY_DECREMENT_LUA);
+                    args.add(String.valueOf(dirtyKeys.size()));
+                    args.addAll(dirtyKeys);
+                    args.add(String.valueOf(RedisKeys.DIRTY_TTL_SECONDS));
+
+
+                    return redis.execute(Command.EVAL, args.toArray(String[]::new))
                             .invoke(deleted -> log.debugf("[PlayerStreamWorker] Released %d dirty key(s) in bulk Redis call.", deleted))
                             .replaceWithVoid();
                 });

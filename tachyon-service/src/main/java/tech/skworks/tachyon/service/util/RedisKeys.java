@@ -1,4 +1,6 @@
-package tech.skworks.tachyon.service.infra;
+package tech.skworks.tachyon.service.util;
+
+import io.smallrye.common.constraint.NotNull;
 
 /**
  * Project Tachyon
@@ -20,31 +22,26 @@ package tech.skworks.tachyon.service.infra;
 public final class RedisKeys {
 
     /** Cross-server ownership lock: set {@code NX EX} on pull, renewed by heartbeats. */
-    public static final String STATE_PREFIX = "player:state:";
-    /** Save-in-progress guard: blocks a concurrent pull while data is being persisted. */
-    public static final String DIRTY_PREFIX = "player:dirty:";
+    private static final String STATE_PREFIX = "player:state:";
+
     /** Hot read cache of the last known profile. */
-    public static final String CACHE_PREFIX = "player:cache:";
+    private static final String CACHE_PREFIX = "player:cache:";
 
     /** TTL (seconds) of the ownership lock — MUST match the heartbeat renewal delay. */
     public static final int STATE_TTL_SECONDS = 30;
     /** TTL (seconds) of the dirty guard. */
-    public static final int DIRTY_TTL_SECONDS = 20;
+    public static final int DIRTY_TTL_SECONDS = 60;
     /** TTL (seconds) of the read cache. */
     public static final int CACHE_TTL_SECONDS = 60 * 30;
 
-    private RedisKeys() {
-    }
+    private RedisKeys() {}
 
-    public static String state(final String uuid) {
+    public static String state(@NotNull final String uuid) {
         return STATE_PREFIX + uuid;
     }
 
-    public static String dirty(final String uuid) {
-        return DIRTY_PREFIX + uuid;
-    }
 
-    public static String cache(final String uuid) {
+    public static String cache(@NotNull final String uuid) {
         return CACHE_PREFIX + uuid;
     }
 }
