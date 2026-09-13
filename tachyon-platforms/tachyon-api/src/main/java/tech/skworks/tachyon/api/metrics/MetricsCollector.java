@@ -1,7 +1,5 @@
 package tech.skworks.tachyon.api.metrics;
 
-import org.jetbrains.annotations.NotNull;
-
 /**
  * Project Tachyon
  * Class MetricsCollector
@@ -11,14 +9,7 @@ import org.jetbrains.annotations.NotNull;
  * @since 1.0.0-SNAPSHOT
  */
 public abstract class MetricsCollector {
-
-    protected final String serverName;
-
-    public MetricsCollector(@NotNull final String serverName) {
-        this.serverName = serverName;
-    }
-
     public abstract void start();
-    public abstract void updateMetrics();
+    public void updateMetrics() {};
     public abstract void stop();
 }

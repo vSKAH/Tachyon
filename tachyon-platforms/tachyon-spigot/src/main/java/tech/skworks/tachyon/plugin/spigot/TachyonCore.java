@@ -20,23 +20,22 @@ import tech.skworks.tachyon.api.services.*;
 import tech.skworks.tachyon.api.snapshot.SnapshotService;
 import tech.skworks.tachyon.api.system.PingResponse;
 import tech.skworks.tachyon.api.system.HealthService;
-import tech.skworks.tachyon.plugin.core.audit.GrpcAuditService;
-import tech.skworks.tachyon.plugin.core.event.TachyonEventBusImpl;
-import tech.skworks.tachyon.plugin.core.resilience.ResilienceService;
-import tech.skworks.tachyon.plugin.core.system.HealthServiceImpl;
+import tech.skworks.tachyon.core.audit.GrpcAuditService;
+import tech.skworks.tachyon.core.component.ComponentRegistryImpl;
+import tech.skworks.tachyon.core.event.TachyonEventBusImpl;
+import tech.skworks.tachyon.core.grpc.GrpcClient;
+import tech.skworks.tachyon.core.metric.MetricsServiceImpl;
+import tech.skworks.tachyon.core.playerdata.AutoSaveTask;
+import tech.skworks.tachyon.core.playerdata.PlayerDataDlqService;
+import tech.skworks.tachyon.core.playerdata.PlayerDataServiceImpl;
+import tech.skworks.tachyon.core.playerdata.TachyonProfileRegistryImpl;
+import tech.skworks.tachyon.core.playersession.PlayerSessionServiceImpl;
+import tech.skworks.tachyon.core.resilience.ResilienceService;
+import tech.skworks.tachyon.core.snapshots.GrpcSnapshotService;
+import tech.skworks.tachyon.core.system.HealthServiceImpl;
 import tech.skworks.tachyon.plugin.spigot.command.SnapshotCommand;
 import tech.skworks.tachyon.plugin.spigot.config.TachyonConfig;
-import tech.skworks.tachyon.plugin.core.playersession.PlayerSessionServiceImpl;
-import tech.skworks.tachyon.plugin.core.snapshots.GrpcSnapshotService;
-import tech.skworks.tachyon.plugin.core.util.TachyonLogger;
-import tech.skworks.tachyon.plugin.core.grpc.GrpcClient;
-import tech.skworks.tachyon.plugin.core.metric.MetricsService;
-import tech.skworks.tachyon.plugin.core.component.ComponentRegistryImpl;
-import tech.skworks.tachyon.plugin.core.playerdata.TachyonProfileRegistryImpl;
 import tech.skworks.tachyon.plugin.spigot.listener.ConnectionListener;
-import tech.skworks.tachyon.plugin.core.playerdata.PlayerDataDlqService;
-import tech.skworks.tachyon.plugin.core.playerdata.PlayerDataServiceImpl;
-import tech.skworks.tachyon.plugin.core.playerdata.AutoSaveTask;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -59,11 +58,9 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
     private final BukkitContext fastStatsContext = new BukkitContext.Factory(this, "f72ccbdc64780bbf3be46ff22903de1f").metrics(Metrics.Factory::create).create();
 
-    private static TachyonCore instance;
-    private TachyonLogger logger;
     private TachyonConfig config;
 
-    private MetricsService metricsService;
+    private MetricsServiceImpl metricsService;
 
     private ComponentRegistryImpl componentRegistry;
     private TachyonProfileRegistry tachyonProfileRegistry;
@@ -77,7 +74,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
     private GrpcSnapshotService snapshotService;
     private ResilienceService resilienceService;
 
-    private TachyonEventBusImpl eventBus;
+    private TachyonEventBusImpl<JavaPlugin> eventBus;
 
     private BukkitTask autoSaveTask;
 
@@ -85,36 +82,35 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
     @Override
     public void onEnable() {
-        instance = this;
         this.tachyonDisabling = true;
-        this.logger = new TachyonLogger(super.getLogger().getName(), "TachyonPlugin");
         this.saveDefaultConfig();
         this.config = TachyonConfig.fromFile(getConfig());
+        getLogger().info("Tachyon Config successfully loaded.");
 
-        this.eventBus = new TachyonEventBusImpl();
-        this.logger.info("Tachyon EventBus successfully initialized.");
+        this.eventBus = new TachyonEventBusImpl<>();
+        getLogger().info("Tachyon EventBus successfully initialized.");
 
-        this.metricsService = new MetricsService(config.serverName(), this);
+        this.metricsService = new MetricsServiceImpl(config.serverName(), config.metricsConfig());
 
         this.componentRegistry = new ComponentRegistryImpl();
-        this.tachyonProfileRegistry = new TachyonProfileRegistryImpl(componentRegistry, metricsService.getTachyonMetrics(), eventBus);
+        this.tachyonProfileRegistry = new TachyonProfileRegistryImpl<>(componentRegistry, eventBus, metricsService.getTachyonCollector());
 
-        this.resilienceService = new ResilienceService(metricsService.getTachyonMetrics());
+        this.resilienceService = new ResilienceService(metricsService.getTachyonCollector());
 
         this.grpcClient = GrpcClient.create(config.grpcClientConfig());
-        this.healthService = new HealthServiceImpl(resilienceService, metricsService.getTachyonMetrics(), grpcClient, config.serverName());
+        this.healthService = new HealthServiceImpl(resilienceService, grpcClient, config.serverName(), metricsService.getTachyonCollector());
 
         if (!checkStartupBackendHealth()) return;
 
-        this.auditService = new GrpcAuditService(resilienceService, metricsService.getTachyonMetrics(), grpcClient, config);
+        this.auditService = new GrpcAuditService(resilienceService, grpcClient, config.auditConfig(), metricsService.getTachyonCollector());
         this.playerDataDlqService = new PlayerDataDlqService(getDataFolder(), grpcClient);
-        this.playerDataService = new PlayerDataServiceImpl(resilienceService, metricsService.getTachyonMetrics(), grpcClient, playerDataDlqService);
-        this.playerSessionService = new PlayerSessionServiceImpl(resilienceService, metricsService.getTachyonMetrics(), grpcClient, this);
-        this.snapshotService = new GrpcSnapshotService(resilienceService, metricsService.getTachyonMetrics(), grpcClient, componentRegistry);
+        this.playerDataService = new PlayerDataServiceImpl(resilienceService, grpcClient, playerDataDlqService, metricsService.getTachyonCollector());
+        this.playerSessionService = new PlayerSessionServiceImpl(resilienceService, grpcClient, config.playerSessionConfig(), tachyonProfileRegistry, metricsService.getTachyonCollector());
+        this.snapshotService = new GrpcSnapshotService(resilienceService, grpcClient, componentRegistry, metricsService.getTachyonCollector());
 
-        this.logger.info("Grpc Services has been initialized.");
+        getLogger().info("Grpc Services has been initialized.");
 
-        this.metricsService.startMetricsCollection(config.metricsConfig());
+        this.metricsService.startMetricsCollection();
 
         getServer().getPluginManager().registerEvents(new ConnectionListener(this), this);
         registerCommand("snapshot", new SnapshotCommand(this));
@@ -125,11 +121,11 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         this.tachyonDisabling = false;
         scheduleAutoSave();
         this.fastStatsContext.ready();
-        this.logger.info("Tachyon Core [{}] initialized.", config.serverName());
+        getLogger().info(String.format("Tachyon Core [%s] initialized.", config.serverName()));
     }
 
     private boolean checkStartupBackendHealth() {
-        this.logger.info("Testing connection to Quarkus Backend at {}:{}...", config.grpcClientConfig().getHost(), config.grpcClientConfig().getPort());
+        getLogger().info(String.format("Testing connection to Quarkus Backend at %s:%s...", config.grpcClientConfig().getHost(), config.grpcClientConfig().getPort()));
 
         try {
             PingResponse ping = healthService.pingBackend().get(5, TimeUnit.SECONDS);
@@ -142,13 +138,13 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
             throw new RuntimeException(e);
         }
 
-        this.logger.info("Connection successful ! Backend is healthy.");
+        getLogger().info("Connection successful ! Backend is healthy.");
         return true;
     }
 
     @Override
     public void onDisable() {
-        this.logger.info("Starting graceful shutdown...");
+        getLogger().info("Starting graceful shutdown...");
         this.fastStatsContext.shutdown();
         this.tachyonDisabling = true;
 
@@ -161,14 +157,14 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
             final Collection<TachyonProfile> profiles = new ArrayList<>(tachyonProfileRegistry.getProfiles());
             final int count = profiles.size();
 
-            logger.info("Saving {} loaded profile(s) before shutdown...", count);
+            getLogger().info(String.format("Saving %s loaded profile(s) before shutdown...", count));
 
             List<CompletableFuture<Void>> saveFutures = new ArrayList<>(count);
 
             for (TachyonProfile profile : profiles) {
                 CompletableFuture<Void> safeSave = getPlayerDataService().pushProfile(profile)
                         .exceptionally(ex -> {
-                            logger.error("saveProfile() failed at shutdown for {}: {}", profile.getUuid(), ex.getMessage());
+                            getLogger().severe(String.format("saveProfile() failed at shutdown for %s: %s", profile.getUuid(), ex.getMessage()));
                             return null;
                         });
                 saveFutures.add(safeSave);
@@ -176,10 +172,11 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
             try {
                 CompletableFuture.allOf(saveFutures.toArray(new CompletableFuture[0])).orTimeout(10, TimeUnit.SECONDS).join();
-                logger.info("All profile saves completed.");
+                getLogger().info("All profile saves completed.");
             } catch (Exception e) {
-                logger.error(e, "Profile saves did not complete within 10s — proceeding with shutdown.");
-                logger.error("Unsaved data may be recovered from the retry queue or dead-letter files.");
+                getLogger().severe("Profile saves did not complete within 10s — proceeding with shutdown.");
+                getLogger().severe("Unsaved data may be recovered from the retry queue or dead-letter files.");
+                e.printStackTrace();
             }
         }
 
@@ -194,7 +191,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         if (snapshotService != null) snapshotService.shutdown();
         if (grpcClient != null) grpcClient.close();
         if (metricsService != null) metricsService.shutdownMetricsCollection();
-        logger.info("Tachyon Core disabled safely.");
+        getLogger().info("Tachyon Core disabled.");
         Bukkit.getServicesManager().unregister(TachyonAPI.class, this);
     }
 
@@ -204,25 +201,22 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
         var playerDataConfig = config.playerDataConfig();
         if (!playerDataConfig.enableDataAutoSave()) {
-            logger.info("Auto-save is disabled — profiles will only be persisted on quit/shutdown.");
+            getLogger().info("Auto-save is disabled — profiles will only be persisted on quit/shutdown.");
             return;
         }
 
         final long intervalTicks = Math.max(1, playerDataConfig.dataAutoSaveDelay()) * 20L;
-        this.autoSaveTask = getServer().getScheduler().runTaskTimerAsynchronously(this, new AutoSaveTask(this.tachyonProfileRegistry, this.playerDataService, this.healthService), intervalTicks, intervalTicks);
+        this.autoSaveTask = getServer().getScheduler().runTaskTimerAsynchronously(this, new AutoSaveTask(this.tachyonProfileRegistry, this.playerDataService,
+                this.playerDataDlqService, this.healthService), intervalTicks, intervalTicks);
 
-        logger.info("Auto-save enabled — flushing all dirty profiles every {}s.", playerDataConfig.dataAutoSaveDelay());
-    }
-
-    public static TachyonLogger getModuleLogger(@NotNull final String moduleName) {
-        return new TachyonLogger(instance.getLogger().getName(), moduleName);
+        getLogger().info(String.format("Auto-save enabled — flushing all dirty profiles every %ds.", playerDataConfig.dataAutoSaveDelay()));
     }
 
     private void registerCommand(@NotNull final String commandName, @NotNull TabExecutor command) {
         PluginCommand pluginCommand = getCommand(commandName);
 
         if (pluginCommand == null) {
-            logger.error("Failed to register command '{}'!", commandName);
+            getLogger().severe(String.join("Failed to register command '%s'!", commandName));
             return;
         }
 
@@ -231,11 +225,12 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
     }
 
     private void errorShutdown() {
-        logger.error("=====================================================");
-        logger.error("[CRITICAL ERROR] Quarkus Backend is UNREACHABLE !");
-        logger.error("Tachyon cannot start without its database.");
-        logger.error("The plugin will now disable itself to prevent data corruption.");
-        logger.error("=====================================================");
+        final var logger = getLogger();
+        logger.severe("=====================================================");
+        logger.severe("[CRITICAL ERROR] Quarkus Backend is UNREACHABLE !");
+        logger.severe("Tachyon cannot start without its database.");
+        logger.severe("The plugin will now disable itself to prevent data corruption.");
+        logger.severe("=====================================================");
         getServer().getPluginManager().disablePlugin(this);
         getServer().shutdown();
     }

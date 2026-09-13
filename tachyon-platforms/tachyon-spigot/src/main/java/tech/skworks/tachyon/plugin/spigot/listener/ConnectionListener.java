@@ -8,13 +8,15 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tech.skworks.tachyon.api.audit.AuditEntry;
 import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
-import tech.skworks.tachyon.plugin.core.metric.scraper.VanillaMetrics;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
-import tech.skworks.tachyon.plugin.core.util.TachyonLogger;
+import tech.skworks.tachyon.plugin.spigot.metrics.VanillaMetrics;
 
 import java.util.UUID;
 
@@ -30,9 +32,9 @@ public class ConnectionListener implements Listener {
 
     private final TachyonCore plugin;
 
-    private static final TachyonLogger LOGGER = TachyonCore.getModuleLogger("ConnectionListener");
+    private static final Logger LOGGER = LoggerFactory.getLogger("Tachyon/ConnectionListener");
 
-    public ConnectionListener(TachyonCore plugin) {
+    public ConnectionListener(@NotNull final TachyonCore plugin) {
         this.plugin = plugin;
     }
 
@@ -68,7 +70,7 @@ public class ConnectionListener implements Listener {
             LOGGER.info("Pre-login successful for {} ({}).", event.getName(), uuid);
 
         } catch (Exception e) {
-            LOGGER.error(e, "Unexpected error during pre-login for {} ({})", event.getName(), uuid);
+            LOGGER.error("Unexpected error during pre-login for {} ({})", event.getName(), uuid, e);
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, "§c[Tachyon] An internal error occurred. Please reconnect.");
         }
     }

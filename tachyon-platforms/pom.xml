@@ -14,5 +14,15 @@
     <modules>
         <module>tachyon-api</module>
         <module>tachyon-spigot</module>
+        <module>tachyon-core</module>
     </modules>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.jetbrains</groupId>
+            <artifactId>annotations</artifactId>
+            <version>26.1.0</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
 </project>
