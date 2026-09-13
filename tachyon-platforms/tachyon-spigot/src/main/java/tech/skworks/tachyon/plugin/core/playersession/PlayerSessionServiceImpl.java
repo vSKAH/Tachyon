@@ -83,8 +83,8 @@ public class PlayerSessionServiceImpl extends AbstractGrpcService implements Pla
                     CallOptions.DEFAULT.withDeadlineAfter(3, TimeUnit.SECONDS),
                     payload
             );
-        }).exceptionally(throwable -> {
-            LOGGER.error(throwable, "Unable to send heartbeat batch");
+        }).exceptionally(_ -> {
+            LOGGER.error("Unable to send heartbeat batch");
             return null;
         }).thenRun(() -> {
             if (log) {

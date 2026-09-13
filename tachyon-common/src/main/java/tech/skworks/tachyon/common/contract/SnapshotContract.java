@@ -21,10 +21,13 @@ public class SnapshotContract extends AbstractContractCreator {
     public static final String SERVICE_NAME = "tech.skworks.tachyon.contract.SnapshotService";
 
     public static final MethodDescriptor<RawBsonDocument, Empty> TAKE_DATABASE_SNAPSHOT = createUnaryMethod(SERVICE_NAME, "TakeDatabaseSnapshot", EMPTY_MARSHALLER);
-    public static final MethodDescriptor<RawBsonDocument, Empty> TAKE_COMPONENT_SNAPSHOT = createUnaryMethod(SERVICE_NAME,"TakeComponentSnapshot", EMPTY_MARSHALLER);
-    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> TOGGLE_SNAPSHOT_LOCK = createUnaryMethod(SERVICE_NAME,"ToggleSnapshotLock", BSON_MARSHALLER);
-    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> LIST_SNAPSHOT = createUnaryMethod(SERVICE_NAME,"ListSnapshot", BSON_MARSHALLER);
-    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> DECODE_SNAPSHOT = createUnaryMethod(SERVICE_NAME,"DecodeSnapshot", BSON_MARSHALLER);
+    public static final MethodDescriptor<RawBsonDocument, Empty> TAKE_COMPONENT_SNAPSHOT = createUnaryMethod(SERVICE_NAME, "TakeComponentSnapshot", EMPTY_MARSHALLER);
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> TOGGLE_SNAPSHOT_LOCK = createUnaryMethod(SERVICE_NAME, "ToggleSnapshotLock", BSON_MARSHALLER);
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> LIST_SNAPSHOT_DAYS = createUnaryMethod(SERVICE_NAME, "ListSnapshotDays", BSON_MARSHALLER);
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> GET_SNAPSHOTS_FOR_DAY = createUnaryMethod(SERVICE_NAME, "GetSnapshotsForDay", BSON_MARSHALLER);
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> DECODE_SNAPSHOT = createUnaryMethod(SERVICE_NAME, "DecodeSnapshot", BSON_MARSHALLER);
+    @Deprecated
+    public static final MethodDescriptor<RawBsonDocument, RawBsonDocument> LIST_SNAPSHOT = createUnaryMethod(SERVICE_NAME, "ListSnapshot", BSON_MARSHALLER);
 
     private SnapshotContract() {}
 }

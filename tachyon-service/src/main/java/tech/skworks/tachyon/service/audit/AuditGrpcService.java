@@ -13,8 +13,8 @@ import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import org.bson.RawBsonDocument;
 import org.jboss.logging.Logger;
+import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.AuditContract;
-import tech.skworks.tachyon.common.marshaller.BsonMarshaller;
 import tech.skworks.tachyon.common.types.Empty;
 
 import java.nio.ByteBuffer;
@@ -71,7 +71,7 @@ public class AuditGrpcService implements BindableService {
     }
 
     public Uni<Empty> logEventBatch(RawBsonDocument req) {
-        final byte[] payloadBytes = toByteArray(req);
+        final byte[] payloadBytes = BsonUtil.toByteArray(req);
 
         return redisStream.xadd(auditConfig.streamKey(), STREAM_ARGS, Map.of("payload", payloadBytes))
                 .invoke(id -> log.debugf("[AuditGrpcService] Audit batch enqueued to stream (id: %s, %d bytes)", id, payloadBytes.length))
@@ -81,20 +81,13 @@ public class AuditGrpcService implements BindableService {
     }
 
     public Uni<Empty> logDirect(RawBsonDocument req) {
-        final byte[] payloadBytes = toByteArray(req);
+        final byte[] payloadBytes = BsonUtil.toByteArray(req);
 
         return redisStream.xadd(auditConfig.streamKey(), STREAM_ARGS, Map.of("direct_payload", payloadBytes))
                 .invoke(id -> log.debugf("[AuditGrpcService] Direct audit log enqueued to stream (id: %s, %d bytes)", id, payloadBytes.length))
                 .replaceWith(Empty.INSTANCE)
                 .onFailure().invoke(e -> log.errorf(e, "[AuditGrpcService] Failed to enqueue direct audit log to Redis"))
                 .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Unable to enqueue direct audit log to Redis").asRuntimeException());
-    }
-
-    public static byte[] toByteArray(RawBsonDocument doc) {
-        ByteBuffer nio = doc.getByteBuffer().asNIO().duplicate();
-        byte[] bytes = new byte[nio.remaining()];
-        nio.get(bytes);
-        return bytes;
     }
 
 

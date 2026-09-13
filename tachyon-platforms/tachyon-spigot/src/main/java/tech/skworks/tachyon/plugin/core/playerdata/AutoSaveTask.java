@@ -46,11 +46,6 @@ public class AutoSaveTask implements Runnable {
     @Override
     public void run() {
 
-        if (!healthService.isHealthy()) {
-            LOGGER.warn("Auto-Save Task is discontinued due to back-end health status.");
-            return;
-        }
-
         if (!processing.compareAndSet(false, true)) {
             return;
         }

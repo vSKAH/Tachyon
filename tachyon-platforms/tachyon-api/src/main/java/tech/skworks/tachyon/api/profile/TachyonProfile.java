@@ -55,7 +55,7 @@ public interface TachyonProfile {
     /**
      * Retrieves a component by its class type, returning a fallback value if it is not found.
      *
-     * @param clazz        The class of the component to retrieve.
+     * @param componentNamespace        The class of the component to retrieve.
      * @param defaultValue The value to return if the player does not have this component loaded.
      * @param <T>          The specific type of the Protobuf message.
      * @return The current component instance, or the provided default value.
@@ -65,7 +65,7 @@ public interface TachyonProfile {
     /**
      * Retrieves a component by its class type.
      *
-     * @param clazz The class of the component to retrieve.
+     * @param ComponentNamespace The class of the component to retrieve.
      * @param <T>   The specific type of the Protobuf message.
      * @return The current component instance, or {@code null} if not found.
      */

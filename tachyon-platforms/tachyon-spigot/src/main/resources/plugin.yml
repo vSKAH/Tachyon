@@ -3,6 +3,7 @@ description: Bridge between tachyon service and bukkit server
 version: '${project.version}'
 author: "vSKAH"
 main: tech.skworks.tachyon.plugin.spigot.TachyonCore
+api-version: '1.13'
 softdepend:
   - "spark"
 commands:

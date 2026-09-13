@@ -178,6 +178,9 @@
                                 <relocation>
                                     <pattern>com.google</pattern>
                                     <shadedPattern>tech.skworks.tachyon.libs.com.google</shadedPattern>
+                                    <excludes>
+                                        <exclude>com.google.gson.**</exclude>
+                                    </excludes>
                                 </relocation>
 
                                 <relocation>

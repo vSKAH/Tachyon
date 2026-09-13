@@ -47,7 +47,6 @@ public class HealthServiceImpl extends AbstractGrpcService implements HealthServ
 
     private volatile boolean healthy = true;
     private volatile boolean warmingUp = false;
-    private volatile boolean ready = true;
 
     public HealthServiceImpl(@NotNull ResilienceService resilience,
                              @Nullable TachyonMetrics tachyonMetrics,
@@ -121,7 +120,7 @@ public class HealthServiceImpl extends AbstractGrpcService implements HealthServ
             long drift = typedResponse.clockDriftMs(receiveTime);
 
             if (typedResponse.healthy()) {
-                LOGGER.info("Ping in {}ms (Drift: {}ms) from '{}' [Mongo: UP, Redis: UP]",
+                LOGGER.debug("Ping in {}ms (Drift: {}ms) from '{}' [Mongo: UP, Redis: UP]",
                         rtt, drift, typedResponse.tachyonServerName());
             } else {
                 LOGGER.warn("Ping in {}ms from '{}' — UNHEALTHY [Mongo: {}, Redis: {}]",

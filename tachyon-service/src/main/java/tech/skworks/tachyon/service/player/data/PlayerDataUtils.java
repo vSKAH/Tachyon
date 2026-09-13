@@ -16,9 +16,7 @@ import io.smallrye.common.constraint.NotNull;
  */
 public class PlayerDataUtils {
 
-    private  PlayerDataUtils() {}
-
-    private static final String DIRTY_PREFIX = "player:dirty:";
+    private PlayerDataUtils() {}
 
     public static final String DIRTY_INCREMENT_LUA = """
             local count = redis.call('INCR', KEYS[1])
@@ -26,7 +24,16 @@ public class PlayerDataUtils {
             return count;
             """;
 
-    public static final String DIRTY_DECREMENT_LUA = """
+    public static final String DIRTY_BATCH_INCREMENT_LUA = """
+            local ttl = tonumber(ARGV[1])
+            for i = 1, #KEYS do
+                redis.call('INCR', KEYS[i])
+                redis.call('EXPIRE', KEYS[i], ttl)
+            end
+            return 1
+            """;
+
+    public static final String DIRTY_BATCH_DECREMENT_LUA = """
             local ttl = tonumber(ARGV[1])
             
             for i = 1, #KEYS do
@@ -43,7 +50,18 @@ public class PlayerDataUtils {
             return 1;
             """;
 
+    public static final int DIRTY_TTL_SECONDS = 60;
+    private static final String DIRTY_PREFIX = "player:dirty:";
+
     public static String dirty(@NotNull final String uuid) {
         return DIRTY_PREFIX + uuid;
     }
+
+    public static final int CACHE_TTL_SECONDS = 60 * 30;
+    private static final String CACHE_PREFIX = "player:cache:";
+
+    public static String cache(@NotNull final String uuid) {
+        return CACHE_PREFIX + uuid;
+    }
+
 }

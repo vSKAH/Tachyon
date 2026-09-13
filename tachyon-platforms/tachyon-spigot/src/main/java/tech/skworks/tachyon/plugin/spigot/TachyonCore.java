@@ -34,6 +34,7 @@ import tech.skworks.tachyon.plugin.core.metric.MetricsService;
 import tech.skworks.tachyon.plugin.core.component.ComponentRegistryImpl;
 import tech.skworks.tachyon.plugin.core.playerdata.TachyonProfileRegistryImpl;
 import tech.skworks.tachyon.plugin.spigot.listener.ConnectionListener;
+import tech.skworks.tachyon.plugin.core.playerdata.PlayerDataDlqService;
 import tech.skworks.tachyon.plugin.core.playerdata.PlayerDataServiceImpl;
 import tech.skworks.tachyon.plugin.core.playerdata.AutoSaveTask;
 
@@ -70,6 +71,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
     private GrpcClient grpcClient;
     private HealthServiceImpl healthService;
     private GrpcAuditService auditService;
+    private PlayerDataDlqService playerDataDlqService;
     private PlayerDataServiceImpl playerDataService;
     private PlayerSessionServiceImpl playerSessionService;
     private GrpcSnapshotService snapshotService;
@@ -105,7 +107,8 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         if (!checkStartupBackendHealth()) return;
 
         this.auditService = new GrpcAuditService(resilienceService, metricsService.getTachyonMetrics(), grpcClient, config);
-        this.playerDataService = new PlayerDataServiceImpl(resilienceService, metricsService.getTachyonMetrics(), grpcClient);
+        this.playerDataDlqService = new PlayerDataDlqService(getDataFolder(), grpcClient);
+        this.playerDataService = new PlayerDataServiceImpl(resilienceService, metricsService.getTachyonMetrics(), grpcClient, playerDataDlqService);
         this.playerSessionService = new PlayerSessionServiceImpl(resilienceService, metricsService.getTachyonMetrics(), grpcClient, this);
         this.snapshotService = new GrpcSnapshotService(resilienceService, metricsService.getTachyonMetrics(), grpcClient, componentRegistry);
 
@@ -118,6 +121,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         getServer().getServicesManager().register(TachyonAPI.class, this, this, ServicePriority.Highest);
 
         this.healthService.startHealthMonitoring();
+        this.healthService.registerRecoveryCallback(playerDataDlqService::replayAll);
         this.tachyonDisabling = false;
         scheduleAutoSave();
         this.fastStatsContext.ready();
@@ -186,6 +190,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         if (healthService != null) healthService.shutdown();
         if (auditService != null) auditService.shutdown();
         if (playerDataService != null) playerDataService.shutdown();
+        if (playerDataDlqService != null) playerDataDlqService.shutdown();
         if (snapshotService != null) snapshotService.shutdown();
         if (grpcClient != null) grpcClient.close();
         if (metricsService != null) metricsService.shutdownMetricsCollection();
@@ -193,11 +198,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         Bukkit.getServicesManager().unregister(TachyonAPI.class, this);
     }
 
-    /**
-     * Periodically flushes dirty profiles to the backend so a server crash can lose at most one
-     * auto-save interval of progress instead of the whole session. Wires the previously dead
-     * {@code services.player-data.auto-save} config to a real async repeating task.
-     */
+
     private void scheduleAutoSave() {
         if (tachyonDisabling || tachyonProfileRegistry == null || playerDataService == null) return;
 
@@ -291,5 +292,9 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
     public ResilienceService getResilienceService() {
         return resilienceService;
+    }
+
+    public PlayerDataDlqService getPlayerDataDlqService() {
+        return playerDataDlqService;
     }
 }

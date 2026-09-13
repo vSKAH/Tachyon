@@ -45,6 +45,11 @@ public class ConnectionListener implements Listener {
             return;
         }
 
+        if (plugin.getPlayerDataDlqService().getPending(event.getUniqueId()) != null) {
+            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, "Tachyon data will be sent ! Please retry is few seconds");
+            return;
+        }
+
         final UUID uuid = event.getUniqueId();
         LOGGER.info("Processing pre-login for {} ({})", event.getName(), uuid);
 
@@ -122,7 +127,6 @@ public class ConnectionListener implements Listener {
                 LOGGER.info("saveProfile() confirmed for {} ({}).", player.getName(), uuid);
             }
 
-            //TODO: add to dlq if failed
             profilesRegistry.unloadProfile(uuid, "DISCONNECT");
             plugin.getPlayerSessionService().unlockPlayerProfile(uuid, player.getName());
         });

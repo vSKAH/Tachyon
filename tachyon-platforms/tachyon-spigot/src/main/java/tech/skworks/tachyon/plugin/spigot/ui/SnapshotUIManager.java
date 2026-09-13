@@ -16,6 +16,7 @@ import org.bukkit.inventory.ItemStack;
 import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.component.ComponentPreviewHandler;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
+import tech.skworks.tachyon.api.snapshot.SnapshotDayInfo;
 import tech.skworks.tachyon.api.snapshot.SnapshotInfo;
 import tech.skworks.tachyon.api.snapshot.SnapshotService;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
@@ -45,37 +46,27 @@ public class SnapshotUIManager {
         final UUID targetUniqueId = target.getUniqueId();
         SnapshotService snapshotService = plugin.getSnapshotService();
 
-        snapshotService.getSnapshots(targetUniqueId.toString()).whenComplete((snapshotListResponse, error) -> {
+        snapshotService.getSnapshotDays(targetUniqueId.toString()).whenComplete((daysListResponse, error) -> {
             if (error != null) {
                 player.sendMessage("§cUnable to fetch the snapshot list (Player: " + targetName + ")");
                 return;
             }
 
-            Map<LocalDate, List<SnapshotInfo>> groupedSnapshots = snapshotListResponse.stream().collect(
-                    Collectors.groupingBy(
-                            snap -> Instant.ofEpochMilli(snap.timestamp()).atZone(ZoneId.systemDefault()).toLocalDate(),
-                            () -> new TreeMap<LocalDate, List<SnapshotInfo>>(Comparator.reverseOrder()),
-                            Collectors.toList()
-                    )
-            );
-
             Bukkit.getScheduler().runTask(plugin, () -> {
                 PaginatedGui gui = Gui.paginated().title(Component.text("§8History of §e" + targetName)).rows(6).pageSize(45).disableAllInteractions().create();
 
-                for (Map.Entry<LocalDate, List<SnapshotInfo>> entry : groupedSnapshots.entrySet()) {
-                    LocalDate date = entry.getKey();
-                    List<SnapshotInfo> daySnapshots = entry.getValue();
-
+                for (SnapshotDayInfo dayInfo : daysListResponse) {
+                    LocalDate date = dayInfo.date();
                     String dateString = date.format(DAY_FORMATTER);
                     String displayDate = dateString.substring(0, 1).toUpperCase() + dateString.substring(1);
 
                     GuiItem folderItem = ItemBuilder.from(Material.BOOK).name(Component.text("§6" + displayDate))
-                            .lore(Component.text("§7Contains §e" + daySnapshots.size() + " §7save(s)"),
+                            .lore(Component.text("§7Contains §e" + dayInfo.count() + " §7save(s)"),
                                     Component.empty(),
                                     Component.text("§a▶ Click to open this day"))
                             .asGuiItem(_ -> {
                                 player.closeInventory();
-                                openSnapshotFoldersGui(plugin, player, target, daySnapshots);
+                                openSnapshotFoldersGui(plugin, player, target, date);
                             });
 
                     gui.addItem(folderItem);
@@ -89,67 +80,76 @@ public class SnapshotUIManager {
         });
     }
 
-    private static void openSnapshotFoldersGui(TachyonCore plugin, Player player, OfflinePlayer target, List<SnapshotInfo> daySnapshots) {
+    private static void openSnapshotFoldersGui(TachyonCore plugin, Player player, OfflinePlayer target, LocalDate date) {
         final String targetName = target.getName();
         PaginatedGui gui = Gui.paginated().title(Component.text("§8History of §e" + targetName)).rows(6).pageSize(45).disableAllInteractions().create();
 
-        for (SnapshotInfo daySnapshot : daySnapshots) {
-            String instant = Instant.ofEpochMilli(daySnapshot.timestamp()).atZone(ZoneId.systemDefault()).format(TIME_FORMATTER);
+        plugin.getSnapshotService().getSnapshotsForDay(target.getUniqueId().toString(), date).whenComplete((daySnapshots, error) -> {
+            if (error != null) {
+                player.sendMessage("§cUnable to fetch snapshots for this day (Player: " + targetName + ")");
+                return;
+            }
 
-            boolean isLocked = daySnapshot.locked();
-            Material icon = isLocked ? Material.ENCHANTED_BOOK : Material.BOOK;
-            String lockLore = isLocked ? "§c🔒 Locked (Protected)" : "§a🔓 Unlocked (Auto-purgeable)";
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                for (SnapshotInfo daySnapshot : daySnapshots) {
+                    String instant = Instant.ofEpochMilli(daySnapshot.timestamp()).atZone(ZoneId.systemDefault()).format(TIME_FORMATTER);
 
-            GuiItem folderItem = ItemBuilder.from(icon).name(Component.text("§6" + instant))
-                    .lore(
-                            Component.text("§7Snapshot Id: §e" + daySnapshot.snapshotId()),
-                            Component.empty(),
-                            Component.text("§7Granularity: §e" + StringUtils.capitalize(daySnapshot.granularity().toLowerCase())),
-                            Component.text("§7Trigger Type: §e" + StringUtils.capitalize(daySnapshot.triggerType().name().toLowerCase())),
-                            Component.text("§7Source: §e" + StringUtils.capitalize(daySnapshot.source().toLowerCase())),
-                            Component.empty(),
-                            Component.text("§7Reason: §e" + StringUtils.capitalize(daySnapshot.reason())),
-                            Component.empty(),
-                            Component.text(lockLore),
-                            Component.empty(),
-                            Component.text("§a▶ Left-Click to preview data"),
-                            Component.text("§e▶ Middle-Click to toggle lock"))
-                    .asGuiItem(event -> {
-                        ClickType click = event.getClick();
-                        if (click == ClickType.MIDDLE) {
-                            player.sendMessage("§7Updating the locking state...");
+                    boolean isLocked = daySnapshot.locked();
+                    Material icon = isLocked ? Material.ENCHANTED_BOOK : Material.BOOK;
+                    String lockLore = isLocked ? "§c🔒 Locked (Protected)" : "§a🔓 Unlocked (Auto-purgeable)";
 
-                            plugin.getSnapshotService().toggleSnapshotLocking(daySnapshot.snapshotId(), player.getUniqueId().toString())
-                                    .whenComplete((lockedResponse, error) -> {
-                                        Bukkit.getScheduler().runTask(plugin, () -> {
-                                            if (error != null) {
-                                                player.sendMessage(error.getMessage());
-                                                return;
-                                            }
+                    GuiItem folderItem = ItemBuilder.from(icon).name(Component.text("§6" + instant))
+                            .lore(
+                                    Component.text("§7Snapshot Id: §e" + daySnapshot.snapshotId()),
+                                    Component.empty(),
+                                    Component.text("§7Granularity: §e" + StringUtils.capitalize(daySnapshot.granularity().toLowerCase())),
+                                    Component.text("§7Trigger Type: §e" + StringUtils.capitalize(daySnapshot.triggerType().name().toLowerCase())),
+                                    Component.text("§7Source: §e" + StringUtils.capitalize(daySnapshot.source().toLowerCase())),
+                                    Component.empty(),
+                                    Component.text("§7Reason: §e" + StringUtils.capitalize(daySnapshot.reason())),
+                                    Component.empty(),
+                                    Component.text(lockLore),
+                                    Component.empty(),
+                                    Component.text("§a▶ Left-Click to preview data"),
+                                    Component.text("§e▶ Middle-Click to toggle lock"))
+                            .asGuiItem(event -> {
+                                ClickType click = event.getClick();
+                                if (click == ClickType.MIDDLE) {
+                                    player.sendMessage("§7Updating the locking state...");
 
-                                            if (lockedResponse) {
-                                                player.sendMessage("§aSuccess, the snapshot has locked!");
-                                            } else {
-                                                player.sendMessage("§eSuccess, the snapshot has unlocked !");
-                                            }
+                                    plugin.getSnapshotService().toggleSnapshotLocking(daySnapshot.snapshotId(), player.getUniqueId().toString())
+                                            .whenComplete((lockedResponse, lockError) -> {
+                                                Bukkit.getScheduler().runTask(plugin, () -> {
+                                                    if (lockError != null) {
+                                                        player.sendMessage(lockError.getMessage());
+                                                        return;
+                                                    }
 
-                                            player.closeInventory();
-                                        });
-                                    });
-                            return;
-                        }
-                        player.closeInventory();
-                        openSnapshotPreview(plugin, player, daySnapshot.snapshotId(), daySnapshot.granularity(), () -> openSnapshotFoldersGui(plugin, player, target, daySnapshots));
-                    });
+                                                    if (lockedResponse) {
+                                                        player.sendMessage("§aSuccess, the snapshot has locked!");
+                                                    } else {
+                                                        player.sendMessage("§eSuccess, the snapshot has unlocked !");
+                                                    }
 
-            gui.addItem(folderItem);
-        }
+                                                    openSnapshotFoldersGui(plugin, player, target, date);
+                                                });
+                                            });
+                                    return;
+                                }
+                                player.closeInventory();
+                                openSnapshotPreview(plugin, player, daySnapshot.snapshotId(), daySnapshot.granularity(), () -> openSnapshotFoldersGui(plugin, player, target, date));
+                            });
 
-        gui.setItem(6, 3, ItemBuilder.from(Material.ARROW).name(Component.text("§a◀ Previous Page")).asGuiItem(_ -> gui.previous()));
-        gui.setItem(6, 5, ItemBuilder.from(Material.PAPER).name(Component.text("§cReturn to Days")).asGuiItem(_ -> openDayFoldersGui(plugin, player, target)));
-        gui.setItem(6, 7, ItemBuilder.from(Material.ARROW).name(Component.text("§aNext Page ▶")).asGuiItem(_ -> gui.next()));
+                    gui.addItem(folderItem);
+                }
 
-        gui.open(player);
+                gui.setItem(6, 3, ItemBuilder.from(Material.ARROW).name(Component.text("§a◀ Previous Page")).asGuiItem(_ -> gui.previous()));
+                gui.setItem(6, 5, ItemBuilder.from(Material.PAPER).name(Component.text("§cReturn to Days")).asGuiItem(_ -> openDayFoldersGui(plugin, player, target)));
+                gui.setItem(6, 7, ItemBuilder.from(Material.ARROW).name(Component.text("§aNext Page ▶")).asGuiItem(_ -> gui.next()));
+
+                gui.open(player);
+            });
+        });
     }
 
     private static void openSnapshotPreview(TachyonCore plugin, Player player, String snapshotId, String granularity, Runnable onBack) {

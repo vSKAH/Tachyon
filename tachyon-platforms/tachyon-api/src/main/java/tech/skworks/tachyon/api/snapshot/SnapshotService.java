@@ -3,6 +3,7 @@ package tech.skworks.tachyon.api.snapshot;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.component.ComponentNamespace;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -45,17 +46,18 @@ public interface SnapshotService {
     CompletableFuture<Void> takeDatabaseSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason, @NotNull final SnapshotTriggerType triggerType);
 
     /**
-     * Triggers an asynchronous backup of a single, specific Protobuf component for a player.
+     * Triggers an asynchronous backup of a single, specific component for a player.
      * <p>
      * This creates a snapshot with {@code SPECIFIC_COMPONENT} granularity in the database.
-     * It is highly optimized, sending only the compressed raw bytes (Zstd) of the targeted component
-     * over the network. Ideal for frequent, highly targeted backups (e.g., saving an inventory right after a trade).
+     * The component record is encoded into pure BSON via its registered {@link tech.skworks.tachyon.api.component.ComponentCodec}
+     * and sent to the backend stream worker.
+     * </p>
      *
-     * @param playerUniqueId The UUID of the player associated with the data.
-     * @param reason         The human-readable reason for this specific snapshot.
-     * @param triggerType    The system or user action that triggered this backup.
-     * @param component      The specific Protobuf message instance containing the data to backup.
-     * @param <T>            The specific type of the Protobuf message.
+     * @param playerUniqueId The UUID of the player associated with the data. Must not be null.
+     * @param reason         The human-readable reason for this specific snapshot. Must not be null.
+     * @param triggerType    The system or user action that triggered this backup. Must not be null.
+     * @param component      The specific component record instance containing the data to backup. Must not be null.
+     * @param <T>            The specific type of the component record.
      * @return A CompletableFuture that completes when the backend has successfully saved the specific snapshot.
      */
     <T extends Record> CompletableFuture<Void> takeComponentSnapshot(@NotNull final String playerUniqueId, @NotNull final String reason, @NotNull final SnapshotTriggerType triggerType, @NotNull final T component);
@@ -77,29 +79,43 @@ public interface SnapshotService {
     CompletableFuture<Boolean> toggleSnapshotLocking(@NotNull final String snapshotId, @NotNull final String executorUniqueId);
 
     /**
-     * Retrieves the metadata history of all snapshots associated with a specific player.
-     * <p>
-     * This method does <b>not</b> download the actual heavy data payloads. It only fetches
-     * the lightweight metadata (IDs, timestamps, reasons, granularity) used to populate
-     * the administrative Snapshot GUI lists.
+     * Retrieves the list of days for which snapshots exist for a specific player, along with the count of saves per day.
      *
-     * @param playerUniqueId The UUID of the player whose snapshot history is being requested.
-     * @return A CompletableFuture containing the response with the list of snapshot metadata.
+     * @param playerUniqueId The UUID of the player whose snapshot days are being requested, not null.
+     * @return A CompletableFuture containing the list of available snapshot days with their metadata.
      */
-    CompletableFuture<List<SnapshotInfo>> getSnapshots(@NotNull final String playerUniqueId);
+    CompletableFuture<List<SnapshotDayInfo>> getSnapshotDays(@NotNull final String playerUniqueId);
 
+    /**
+     * Retrieves the lightweight metadata for all snapshots recorded on a specific calendar day for a given player.
+     *
+     * @param playerUniqueId The UUID of the player whose snapshots are being requested, not null.
+     * @param date           The target calendar date, not null.
+     * @return A CompletableFuture containing the list of snapshot metadata for that day.
+     */
+    CompletableFuture<List<SnapshotInfo>> getSnapshotsForDay(@NotNull final String playerUniqueId, @NotNull final LocalDate date);
 
     /**
      * Fetches and decodes the actual data payload of a specific snapshot from the backend.
      * <p>
-     * Whether the snapshot is {@code FULL} (JSON parsed) or {@code SPECIFIC_COMPONENT} (Raw Binary),
-     * the backend will process it and return a standardized response containing the decoded
-     * Protobuf components wrapped in {@link com.google.protobuf.Any} objects, ready to be
-     * processed by the {@link tech.skworks.tachyon.api.component.ComponentRegistry}.
+     * The backend retrieves the raw BSON document from MongoDB, extracts the component subdocuments,
+     * and transfers them across the wire. Each component is subsequently deserialized into its
+     * corresponding Java {@link Record} via the {@link tech.skworks.tachyon.api.component.ComponentRegistry}.
+     * </p>
      *
-     * @param snapshotId The unique MongoDB ObjectId string of the snapshot to retrieve.
-     * @return A CompletableFuture containing the decoded snapshot data payload.
+     * @param snapshotId The unique MongoDB ObjectId string of the snapshot to retrieve. Must not be null.
+     * @return A CompletableFuture containing an immutable map of decoded component records keyed by namespace.
      */
-    <T extends Record> CompletableFuture<Map<ComponentNamespace, T>> decodeSnapshot(@NotNull final String snapshotId);
+    CompletableFuture<Map<ComponentNamespace, Record>> decodeSnapshot(@NotNull final String snapshotId);
+
+    /**
+     * Fetches and decodes a specific component from a snapshot.
+     *
+     * @param snapshotId The unique MongoDB ObjectId string of the snapshot to retrieve. Must not be null.
+     * @param namespace  The namespace of the component to retrieve. Must not be null.
+     * @param <T>        The record type of the component.
+     * @return A CompletableFuture containing the decoded component record, or null if not present in the snapshot.
+     */
+    <T extends Record> CompletableFuture<T> decodeSnapshotComponent(@NotNull final String snapshotId, @NotNull final ComponentNamespace namespace);
 
 }

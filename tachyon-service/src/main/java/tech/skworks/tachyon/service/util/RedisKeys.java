@@ -24,15 +24,9 @@ public final class RedisKeys {
     /** Cross-server ownership lock: set {@code NX EX} on pull, renewed by heartbeats. */
     private static final String STATE_PREFIX = "player:state:";
 
-    /** Hot read cache of the last known profile. */
-    private static final String CACHE_PREFIX = "player:cache:";
-
     /** TTL (seconds) of the ownership lock — MUST match the heartbeat renewal delay. */
     public static final int STATE_TTL_SECONDS = 30;
-    /** TTL (seconds) of the dirty guard. */
-    public static final int DIRTY_TTL_SECONDS = 60;
     /** TTL (seconds) of the read cache. */
-    public static final int CACHE_TTL_SECONDS = 60 * 30;
 
     private RedisKeys() {}
 
@@ -41,7 +35,4 @@ public final class RedisKeys {
     }
 
 
-    public static String cache(@NotNull final String uuid) {
-        return CACHE_PREFIX + uuid;
-    }
 }

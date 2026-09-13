@@ -6,7 +6,6 @@ import io.grpc.StatusRuntimeException;
 import io.grpc.stub.ClientCalls;
 import org.bson.BsonDocument;
 import org.bson.BsonString;
-import org.bson.BsonValue;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.component.ComponentCodec;
@@ -23,10 +22,15 @@ import tech.skworks.tachyon.plugin.core.metric.scraper.TachyonMetrics;
 import tech.skworks.tachyon.plugin.core.grpc.AbstractGrpcService;
 import tech.skworks.tachyon.plugin.core.util.TachyonLogger;
 
+import org.bson.BsonInt64;
+import tech.skworks.tachyon.api.snapshot.SnapshotDayInfo;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import tech.skworks.tachyon.plugin.core.resilience.ResilienceService;
 import java.util.concurrent.*;
 
@@ -84,7 +88,7 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
             BsonDocument requestDocument = new BsonDocument()
                     .append("uuid", new BsonString(playerUniqueId))
                     .append("reason", new BsonString(reason))
-                    .append("triggerType", new BsonString(triggerType.name()));
+                    .append("trigger_type", new BsonString(triggerType.name()));
 
             ClientCalls.blockingUnaryCall(grpcClient.getChannel(), SnapshotContract.TAKE_DATABASE_SNAPSHOT,
                     CallOptions.DEFAULT.withDeadlineAfter(3, TimeUnit.SECONDS), BsonUtil.toRawBsonDocument(requestDocument));
@@ -132,62 +136,129 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
     }
 
     @Override
-    public CompletableFuture<List<SnapshotInfo>> getSnapshots(@NotNull final String playerUniqueId) {
-        return asyncCall(executor, LOGGER, "getSnapshots", () -> {
-
+    public CompletableFuture<List<SnapshotDayInfo>> getSnapshotDays(@NotNull final String playerUniqueId) {
+        Objects.requireNonNull(playerUniqueId, "playerUniqueId cannot be null");
+        return asyncCall(executor, LOGGER, "getSnapshotDays", () -> {
             final var request = new BsonDocument("uuid", new BsonString(playerUniqueId));
 
-            final var responseDocument = ClientCalls.blockingUnaryCall(grpcClient.getChannel(), SnapshotContract.LIST_SNAPSHOT,
-                    CallOptions.DEFAULT.withDeadlineAfter(5, TimeUnit.SECONDS), BsonUtil.toRawBsonDocument(request));
+            final var responseDocument = ClientCalls.blockingUnaryCall(
+                    grpcClient.getChannel(),
+                    SnapshotContract.LIST_SNAPSHOT_DAYS,
+                    CallOptions.DEFAULT.withDeadlineAfter(5, TimeUnit.SECONDS),
+                    BsonUtil.toRawBsonDocument(request)
+            );
 
-            List<SnapshotInfo> list = new ArrayList<>();
-
-            if (responseDocument.containsKey("snapshots") && responseDocument.isArray("snapshots")) {
-                list = new ArrayList<>(responseDocument.getArray("snapshots").size());
-                for (BsonValue snapshots : responseDocument.getArray("snapshots")) {
-                    BsonDocument snapshotDocument = snapshots.asDocument();
-                    list.add(new SnapshotInfo(
-                            snapshotDocument.getString("snapshot_id").getValue(),
-                            snapshotDocument.getInt64("timestamp").getValue(),
-                            snapshotDocument.getString("reason").getValue(),
-                            snapshotDocument.getString("source").getValue(),
-                            SnapshotTriggerType.fromString(snapshotDocument.getString("trigger_type").getValue()),
-                            snapshotDocument.getString("granularity").getValue(),
-                            snapshotDocument.getBoolean("locked").getValue()
-                            ));
+            final var list = new ArrayList<SnapshotDayInfo>();
+            if (responseDocument.containsKey("days") && responseDocument.isArray("days")) {
+                for (final var dayVal : responseDocument.getArray("days")) {
+                    if (!dayVal.isDocument()) continue;
+                    final var dayDoc = dayVal.asDocument();
+                    final var date = LocalDate.parse(dayDoc.getString("date").getValue());
+                    final var count = dayDoc.getInt32("count").getValue();
+                    final var lastTs = dayDoc.getInt64("last_timestamp").getValue();
+                    list.add(new SnapshotDayInfo(date, count, lastTs));
                 }
             }
-
             return list;
         });
     }
 
-    public <T extends Record> CompletableFuture<Map<ComponentNamespace, T>> decodeSnapshot(@NotNull final String snapshotId)
-    {
+    @Override
+    public CompletableFuture<List<SnapshotInfo>> getSnapshotsForDay(@NotNull final String playerUniqueId, @NotNull final LocalDate date) {
+        Objects.requireNonNull(playerUniqueId, "playerUniqueId cannot be null");
+        Objects.requireNonNull(date, "date cannot be null");
+        return asyncCall(executor, LOGGER, "getSnapshotsForDay", () -> {
+            final var zone = ZoneId.systemDefault();
+            final long startTs = date.atStartOfDay(zone).toInstant().toEpochMilli();
+            final long endTs = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1;
+
+            final var request = new BsonDocument()
+                    .append("uuid", new BsonString(playerUniqueId))
+                    .append("date", new BsonString(date.toString()))
+                    .append("start_timestamp", new BsonInt64(startTs))
+                    .append("end_timestamp", new BsonInt64(endTs));
+
+            final var responseDocument = ClientCalls.blockingUnaryCall(
+                    grpcClient.getChannel(),
+                    SnapshotContract.GET_SNAPSHOTS_FOR_DAY,
+                    CallOptions.DEFAULT.withDeadlineAfter(5, TimeUnit.SECONDS),
+                    BsonUtil.toRawBsonDocument(request)
+            );
+
+            final var list = new ArrayList<SnapshotInfo>();
+            if (responseDocument.containsKey("snapshots") && responseDocument.isArray("snapshots")) {
+                for (final var snapVal : responseDocument.getArray("snapshots")) {
+                    if (!snapVal.isDocument()) continue;
+                    final var snapDoc = snapVal.asDocument();
+                    list.add(new SnapshotInfo(
+                            snapDoc.getString("snapshot_id").getValue(),
+                            snapDoc.getInt64("timestamp").getValue(),
+                            snapDoc.getString("reason").getValue(),
+                            snapDoc.getString("source").getValue(),
+                            SnapshotTriggerType.fromString(snapDoc.getString("trigger_type").getValue()),
+                            snapDoc.getString("granularity").getValue(),
+                            snapDoc.getBoolean("locked").getValue()
+                    ));
+                }
+            }
+            return list;
+        });
+    }
+
+    @Override
+    public CompletableFuture<Map<ComponentNamespace, Record>> decodeSnapshot(@NotNull final String snapshotId) {
+        Objects.requireNonNull(snapshotId, "snapshotId cannot be null");
         return asyncCall(executor, LOGGER, "decodeSnapshot", () -> {
             final var request = new BsonDocument("snapshot_id", new BsonString(snapshotId));
-            final var responseDocument = ClientCalls.blockingUnaryCall(grpcClient.getChannel(), SnapshotContract.DECODE_SNAPSHOT,
-                    CallOptions.DEFAULT.withDeadlineAfter(5, TimeUnit.SECONDS), BsonUtil.toRawBsonDocument(request));
+            final var responseDocument = ClientCalls.blockingUnaryCall(
+                    grpcClient.getChannel(),
+                    SnapshotContract.DECODE_SNAPSHOT,
+                    CallOptions.DEFAULT.withDeadlineAfter(5, TimeUnit.SECONDS),
+                    BsonUtil.toRawBsonDocument(request)
+            );
 
+            final Map<ComponentNamespace, Record> map = new HashMap<>();
+            final var components = responseDocument.containsKey("components") && responseDocument.isDocument("components")
+                    ? responseDocument.getDocument("components")
+                    : responseDocument;
 
-            Map<ComponentNamespace, T> map = new HashMap<>();
-            if (responseDocument.containsKey("components") && responseDocument.isDocument("components")) {
-                final var components = responseDocument.getDocument("components");
-                for (String namespaceStr : components.keySet()) {
-                    final var component = components.getDocument(namespaceStr);
-                    final var namespace = ComponentNamespace.parse(namespaceStr);
-
-                    final var codec = componentRegistry.getCodec(namespace);
-                    if (codec == null) {
-                        LOGGER.error("Unsupported component namespace '{}'", namespace);
+            for (final String namespaceStr : components.keySet()) {
+                    if (!components.isDocument(namespaceStr)) {
+                        LOGGER.warn("Component '{}' in snapshot '{}' is not a valid BSON document", namespaceStr, snapshotId);
                         continue;
                     }
 
-                    map.put(namespace, (T) codec.decode(component));
+                    final ComponentNamespace namespace;
+                    try {
+                        namespace = ComponentNamespace.parse(namespaceStr);
+                    } catch (IllegalArgumentException e) {
+                        LOGGER.error("Invalid component namespace '{}' in snapshot '{}'", namespaceStr, snapshotId, e);
+                        continue;
+                    }
+
+                    final var codec = componentRegistry.getCodec(namespace);
+                    if (codec == null) {
+                        LOGGER.warn("Unsupported component namespace '{}' in snapshot '{}' (no registered codec)", namespace, snapshotId);
+                        continue;
+                    }
+
+                    try {
+                        final var componentBson = components.getDocument(namespaceStr);
+                        final Record decoded = codec.decode(componentBson);
+                        if (decoded != null) {
+                            map.put(namespace, decoded);
+                        }
+                    } catch (Exception e) {
+                        LOGGER.error("Failed to decode component '{}' in snapshot '{}'", namespace, snapshotId, e);
+                    }
                 }
-            }
-            return map;
-        });
+                return Map.copyOf(map);
+            });
+    }
+
+    @Override
+    public <T extends Record> CompletableFuture<T> decodeSnapshotComponent(@NotNull String snapshotId, @NotNull ComponentNamespace namespace) {
+        return decodeSnapshot(snapshotId).thenApply(map -> (T) map.get(namespace));
     }
 
 

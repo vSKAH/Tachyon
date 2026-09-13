@@ -4,7 +4,6 @@ import com.mongodb.client.model.*;
 import io.quarkus.mongodb.reactive.ReactiveMongoClient;
 import io.quarkus.mongodb.reactive.ReactiveMongoCollection;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
-import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
 import io.quarkus.redis.datasource.stream.ClaimedMessages;
 import io.quarkus.redis.datasource.stream.ReactiveStreamCommands;
 import io.quarkus.redis.datasource.stream.StreamMessage;
@@ -268,7 +267,18 @@ class PlayerDataStreamWorker {
         }
 
         public List<WriteModel<Document>> toModels(final @NotNull String uuid) {
-            final var models = new ArrayList<WriteModel<Document>>(componentSaves.size() + componentRemoves.size());
+
+            if (componentSaves.isEmpty() && componentRemoves.isEmpty()) {
+                return List.of();
+            }
+
+            final var models = new ArrayList<WriteModel<Document>>((componentSaves.size() + componentRemoves.size()) * 2);
+
+            models.add(new UpdateOneModel<>(
+                    Filters.eq(PlayerDataContract.FIELD_UUID, uuid),
+                    Updates.setOnInsert(PlayerDataContract.FIELD_UUID, uuid),
+                    new UpdateOptions().upsert(true)
+            ));
 
             for (final var saveEntry : componentSaves.entrySet()) {
                 final var componentName = saveEntry.getKey();
@@ -286,7 +296,7 @@ class PlayerDataStreamWorker {
                 } else {
                     update = Updates.set(specificComponentField, componentData);
                 }
-                models.add(new UpdateOneModel<>(filter, update, new UpdateOptions().upsert(true)));
+                models.add(new UpdateOneModel<>(filter, update, new UpdateOptions().upsert(false)));
             }
 
             for (final var componentNameRemove : componentRemoves) {
@@ -304,7 +314,7 @@ class PlayerDataStreamWorker {
                     update = Updates.unset(specificComponentField);
 
 
-                models.add(new UpdateOneModel<>(filter, update, new UpdateOptions().upsert(true)));
+                models.add(new UpdateOneModel<>(filter, update, new UpdateOptions().upsert(false)));
             }
 
             return models;
@@ -326,7 +336,7 @@ class PlayerDataStreamWorker {
                     for (final RawBsonDocument updatedDocument : docs) {
                         final var uuid = updatedDocument.getString(PlayerDataContract.FIELD_UUID).getValue();
                         final var bytesToCache = BsonUtil.toByteArray(updatedDocument);
-                        setExpirationsUni.add(redisBytes.setex(RedisKeys.cache(uuid), RedisKeys.CACHE_TTL_SECONDS, bytesToCache).invoke(() -> log.debugf("[PlayerStreamWorker] Cache updated for %s (%d bytes).", uuid, bytesToCache.length)));
+                        setExpirationsUni.add(redisBytes.setex(PlayerDataUtils.cache(uuid), PlayerDataUtils.CACHE_TTL_SECONDS, bytesToCache).invoke(() -> log.debugf("[PlayerStreamWorker] Cache updated for %s (%d bytes).", uuid, bytesToCache.length)));
                     }
                     return setExpirationsUni.isEmpty() ? Uni.createFrom().voidItem() : Uni.combine().all().unis(setExpirationsUni).discardItems();
                 })
@@ -339,10 +349,10 @@ class PlayerDataStreamWorker {
                     }
 
                     final var args = new ArrayList<String>(dirtyKeys.size() + 3);
-                    args.add(PlayerDataUtils.DIRTY_DECREMENT_LUA);
+                    args.add(PlayerDataUtils.DIRTY_BATCH_DECREMENT_LUA);
                     args.add(String.valueOf(dirtyKeys.size()));
                     args.addAll(dirtyKeys);
-                    args.add(String.valueOf(RedisKeys.DIRTY_TTL_SECONDS));
+                    args.add(String.valueOf(PlayerDataUtils.DIRTY_TTL_SECONDS));
 
 
                     return redis.execute(Command.EVAL, args.toArray(String[]::new))

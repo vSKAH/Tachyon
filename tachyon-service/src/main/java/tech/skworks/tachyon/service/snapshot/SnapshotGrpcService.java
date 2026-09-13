@@ -1,5 +1,7 @@
 package tech.skworks.tachyon.service.snapshot;
 
+import com.mongodb.client.model.Accumulators;
+import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Projections;
 import com.mongodb.client.model.Sorts;
@@ -14,6 +16,7 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.stream.ReactiveStreamCommands;
 import io.quarkus.redis.datasource.stream.XAddArgs;
 import io.smallrye.common.annotation.NonBlocking;
+import io.smallrye.common.constraint.NotNull;
 import io.smallrye.mutiny.Uni;
 import jakarta.annotation.PostConstruct;
 import jakarta.inject.Inject;
@@ -28,8 +31,12 @@ import tech.skworks.tachyon.common.types.Empty;
 import tech.skworks.tachyon.service.audit.AuditGrpcService;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Project Tachyon
@@ -55,7 +62,7 @@ public class SnapshotGrpcService implements BindableService {
     @ConfigProperty(name = "quarkus.mongodb.database", defaultValue = "tachyon")
     String databaseName;
 
-    private ReactiveMongoCollection<Document> snapshotCollection;
+    private ReactiveMongoCollection<RawBsonDocument> snapshotCollection;
 
     private final ReactiveStreamCommands<String, String, byte[]> redisStream;
     private static final XAddArgs STREAM_ARGS = new XAddArgs().maxlen(50000L).nearlyExactTrimming();
@@ -66,7 +73,7 @@ public class SnapshotGrpcService implements BindableService {
 
     @PostConstruct
     void init() {
-        this.snapshotCollection = mongoClient.getDatabase(databaseName).getCollection(snapshotConfig.collection());
+        this.snapshotCollection = mongoClient.getDatabase(databaseName).getCollection(snapshotConfig.collection(), RawBsonDocument.class);
         this.logger.debug("SnapshotGrpcService collections initialized.");
     }
 
@@ -100,8 +107,17 @@ public class SnapshotGrpcService implements BindableService {
                             responseObserver::onError
                     );
                 }))
-                .addMethod(SnapshotContract.LIST_SNAPSHOT, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
-                    listSnapshots(request).subscribe().with(
+                .addMethod(SnapshotContract.LIST_SNAPSHOT_DAYS, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                    listSnapshotDays(request).subscribe().with(
+                            response -> {
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                            },
+                            responseObserver::onError
+                    );
+                }))
+                .addMethod(SnapshotContract.GET_SNAPSHOTS_FOR_DAY, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                    getSnapshotsForDay(request).subscribe().with(
                             response -> {
                                 responseObserver.onNext(response);
                                 responseObserver.onCompleted();
@@ -130,21 +146,24 @@ public class SnapshotGrpcService implements BindableService {
         }
     }
 
-    public Uni<RawBsonDocument> toggleLockSnapshot(RawBsonDocument request) {
+    public Uni<RawBsonDocument> toggleLockSnapshot(@NotNull final RawBsonDocument request) {
+        Objects.requireNonNull(request, "request cannot be null");
+
         if (!request.containsKey("snapshot_id")) {
             return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("snapshot_id is required").asRuntimeException());
         }
+
         final String snapshotId = request.getString("snapshot_id").getValue();
         final String lockerId = request.containsKey("locker_id") ? request.getString("locker_id").getValue() : "SYSTEM";
 
         return parseObjectId(snapshotId)
                 .chain(objectId -> {
-                    Bson filter = Filters.eq("_id", objectId);
+                    final var filter = Filters.eq("_id", objectId);
 
                     return snapshotCollection.find(filter).collect().first()
                             .onItem().ifNull().failWith(() -> new StatusRuntimeException(Status.NOT_FOUND.withDescription("This snapshot does not exist in the database.")))
                             .chain(document -> {
-                                boolean currentLock = document.getBoolean("locked", false);
+                                boolean currentLock = document.getBoolean("locked", new BsonBoolean(false)).getValue();
                                 boolean newLockStatus = !currentLock;
 
                                 Bson updates = Updates.combine(
@@ -181,7 +200,7 @@ public class SnapshotGrpcService implements BindableService {
         }
         Map<String, byte[]> payload = new HashMap<>();
         payload.put("granularity", "FULL".getBytes(StandardCharsets.UTF_8));
-        payload.put("global_payload", toByteArray(req));
+        payload.put("global_payload", BsonUtil.toByteArray(req));
 
         return pushToStream(payload);
     }
@@ -193,7 +212,7 @@ public class SnapshotGrpcService implements BindableService {
 
         Map<String, byte[]> payload = new HashMap<>();
         payload.put("granularity", "SPECIFIC_COMPONENT".getBytes(StandardCharsets.UTF_8));
-        payload.put("specific_payload", toByteArray(req));
+        payload.put("specific_payload", BsonUtil.toByteArray(req));
         return pushToStream(payload);
     }
 
@@ -207,99 +226,145 @@ public class SnapshotGrpcService implements BindableService {
                 .onFailure().transform(e -> Status.UNAVAILABLE.withDescription("The snapshot buffer (Redis) is currently unavailable.").withCause(e).asRuntimeException());
     }
 
-    public Uni<RawBsonDocument> listSnapshots(RawBsonDocument req) {
-        if (!req.containsKey("uuid")) {
+    public Uni<RawBsonDocument> listSnapshotDays(@NotNull final RawBsonDocument req) {
+        Objects.requireNonNull(req, "req cannot be null");
+        if (!req.containsKey("uuid") || !req.isString("uuid")) {
             return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("uuid is required").asRuntimeException());
         }
         final String uuid = req.getString("uuid").getValue();
 
-        return snapshotCollection.find(Filters.eq("uuid", uuid), new FindOptions()
-                        .sort(Sorts.descending("timestamp"))
-                        .projection(Projections.exclude("components", "data")))
-                .collect().asList().onFailure().transform(e -> {
-                    logger.errorf(e, "Failed to fetch snapshots for player %s", uuid);
-                    return Status.INTERNAL.withDescription("Database error occurred").withCause(e).asRuntimeException();
-                }).map(docs -> {
-                    BsonArray snapshotsArray = new BsonArray();
+        final List<Bson> pipeline = List.of(
+                Aggregates.match(Filters.eq("uuid", uuid)),
+                Aggregates.project(Projections.fields(
+                        Projections.computed("date", new Document("$dateToString", new Document("format", "%Y-%m-%d").append("date", new Document("$toDate", "$timestamp")))),
+                        Projections.include("timestamp")
+                )),
+                Aggregates.group("$date",
+                        Accumulators.sum("count", 1),
+                        Accumulators.max("last_timestamp", "$timestamp")
+                ),
+                Aggregates.sort(Sorts.descending("_id"))
+        );
 
-                    for (Document document : docs) {
-                        try {
-                            String typeStr = document.getString("trigger_type");
-                            Number timestampNum = document.get("timestamp", Number.class);
-                            long timestamp = (timestampNum != null) ? timestampNum.longValue() : 0L;
+        return snapshotCollection.aggregate(pipeline).collect().asList()
+                .onFailure().transform(e -> {
+                    logger.errorf(e, "Failed to aggregate snapshot days for player %s", uuid);
+                    return Status.INTERNAL.withDescription("Database error occurred while fetching snapshot days").withCause(e).asRuntimeException();
+                })
+                .map(docs -> {
+                    final var daysArray = new BsonArray();
+                    for (final var doc : docs) {
+                        final var dateStr = doc.getString("_id");
+                        final var count = doc.getNumber("count", new BsonInt32(0));
+                        final var lastTimestamp = doc.getNumber("last_timestamp", new BsonInt64(0L));
 
-                            String reason = document.getString("reason");
-                            String source = document.getString("source");
-                            String granularity = document.getString("granularity");
+                        if (dateStr == null) continue;
 
-                            BsonDocument snapDoc = new BsonDocument()
-                                    .append("snapshot_id", new BsonString(document.getObjectId("_id").toHexString()))
-                                    .append("trigger_type", new BsonString(typeStr != null ? typeStr : "UNKNOWN"))
-                                    .append("timestamp", new BsonInt64(timestamp))
-                                    .append("reason", new BsonString(reason != null ? reason : "N/A"))
-                                    .append("source", new BsonString(source != null ? source : "UNKNOWN"))
-                                    .append("granularity", new BsonString(granularity != null ? granularity : "FULL"))
-                                    .append("locked", new BsonBoolean(document.getBoolean("locked", false)));
-
-                            snapshotsArray.add(snapDoc);
-
-                        } catch (Exception e) {
-                            logger.warnf("Skipping corrupted snapshot document %s: %s", document.getObjectId("_id"), e.getMessage());
-                        }
+                        final var dayDocument = new BsonDocument().append("date", dateStr).append("count", count).append("last_timestamp", lastTimestamp);
+                        daysArray.add(dayDocument);
                     }
-
-                    BsonDocument responseDoc = new BsonDocument()
-                            .append("uuid", new BsonString(uuid))
-                            .append("snapshots", snapshotsArray);
-
-                    return BsonUtil.toRawBsonDocument(responseDoc);
+                    return BsonUtil.toRawBsonDocument(new BsonDocument("days", daysArray));
                 });
     }
 
-    public Uni<RawBsonDocument> decodeSnapshot(RawBsonDocument req) {
+    public Uni<RawBsonDocument> getSnapshotsForDay(@NotNull final RawBsonDocument req) {
+        Objects.requireNonNull(req, "req cannot be null");
+        if (!req.containsKey("uuid") || !req.isString("uuid")) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("uuid is required").asRuntimeException());
+        }
+        final String uuid = req.getString("uuid").getValue();
+
+        final Bson filter;
+        if (req.containsKey("start_timestamp") && req.containsKey("end_timestamp")) {
+            final var startTimestamp = req.getInt64("start_timestamp").getValue();
+            final var endTimestamp = req.getInt64("end_timestamp").getValue();
+            filter = Filters.and(
+                    Filters.eq("uuid", uuid),
+                    Filters.gte("timestamp", startTimestamp),
+                    Filters.lte("timestamp", endTimestamp)
+            );
+        } else if (req.containsKey("date") && req.isString("date")) {
+            final var date = req.getString("date").getValue();
+            final var localDate = LocalDate.parse(date);
+            final var startTimestamp = localDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli();
+            final var endTs = localDate.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() - 1;
+            filter = Filters.and(
+                    Filters.eq("uuid", uuid),
+                    Filters.gte("timestamp", startTimestamp),
+                    Filters.lte("timestamp", endTs)
+            );
+        } else {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("start_timestamp/end_timestamp or date is required").asRuntimeException());
+        }
+
+        return snapshotCollection.find(filter, new FindOptions().sort(Sorts.descending("timestamp"))
+                        .projection(Projections.exclude("components", "data")))
+                .collect().asList()
+                .onFailure().transform(e -> {
+                    logger.errorf(e, "Failed to fetch snapshots for player %s for day", uuid);
+                    return Status.INTERNAL.withDescription("Database error occurred").withCause(e).asRuntimeException();
+                })
+                .map(docs -> {
+                    final var snapshotsArray = new BsonArray();
+                    for (final var document : docs) {
+                        try {
+                            final var triggerType = document.getString("trigger_type", new BsonString("UNKNOWN"));
+                            final var timestamp = document.get("timestamp", new BsonInt64(0L));
+
+                            final var reason = document.getString("reason", new BsonString("N/A"));
+                            final var source = document.getString("source", new BsonString("UNKNOWN"));
+                            final var granularity = document.getString("granularity", new BsonString("FULL"));
+
+                            final var snapDoc = new BsonDocument()
+                                    .append("snapshot_id", new BsonString(document.getObjectId("_id").getValue().toHexString()))
+                                    .append("trigger_type", triggerType)
+                                    .append("timestamp", timestamp)
+                                    .append("reason", reason)
+                                    .append("source", source)
+                                    .append("granularity", granularity)
+                                    .append("locked", document.getBoolean("locked", new BsonBoolean(false)));
+
+                            snapshotsArray.add(snapDoc);
+                        } catch (Exception e) {
+                            logger.warnf("Skipping corrupted snapshot document %s: %s", document.getObjectId("_id").getValue(), e.getMessage());
+                        }
+                    }
+                    return BsonUtil.toRawBsonDocument(new BsonDocument("snapshots", snapshotsArray));
+                });
+    }
+
+    public Uni<RawBsonDocument> decodeSnapshot(final @NotNull RawBsonDocument req) {
         if (!req.containsKey("snapshot_id")) {
             return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("snapshot_id is required").asRuntimeException());
         }
-        final String snapshotId = req.getString("snapshot_id").getValue();
+        final var snapshotId = req.getString("snapshot_id");
 
-        return parseObjectId(snapshotId)
-                .chain(objectId -> snapshotCollection.find(Filters.eq("_id", objectId)).collect().first()
+        final var projection = new FindOptions().projection(Projections.fields(
+                Projections.include("components", "target_component", "data"),
+                Projections.excludeId()
+        ));
+
+        return parseObjectId(snapshotId.getValue())
+                .chain(objectId -> snapshotCollection.find(Filters.eq("_id", objectId), projection).collect().first()
                         .onItem().ifNull().failWith(() -> Status.NOT_FOUND.withDescription("This snapshot does not exist in the database.").asRuntimeException())
                         .onFailure(e -> !(e instanceof StatusRuntimeException))
                         .transform(e -> {
-                            logger.errorf(e, "Database error while fetching snapshot %s", snapshotId);
+                            logger.errorf(e, "Database error while fetching snapshot %s", snapshotId.getValue());
                             return Status.INTERNAL.withDescription("Database error occurred").withCause(e).asRuntimeException();
                         }))
                 .map(doc -> {
-                    String granularity = doc.getString("granularity");
-                    String uuid = doc.getString("uuid");
-                    Number timestampNum = doc.get("timestamp", Number.class);
-                    long timestamp = timestampNum != null ? timestampNum.longValue() : 0L;
-
-                    BsonDocument response = new BsonDocument()
-                            .append("snapshot_id", new BsonString(snapshotId))
-                            .append("uuid", new BsonString(uuid != null ? uuid : ""))
-                            .append("granularity", new BsonString(granularity != null ? granularity : "FULL"))
-                            .append("timestamp", new BsonInt64(timestamp));
-
-                    if (doc.containsKey("components")) {
-                        Document componentsDoc = doc.get("components", Document.class);
-                        if (componentsDoc != null) {
-                            response.append("components", componentsDoc.toBsonDocument());
-                        } else {
-                            response.append("components", new BsonDocument());
-                        }
+                    BsonDocument componentsBson;
+                    if (doc.containsKey("components") && doc.isDocument("components")) {
+                        componentsBson = doc.getDocument("components");
+                    } else if (doc.containsKey("target_component") && doc.containsKey("data") && doc.isDocument("data")) {
+                        componentsBson = new BsonDocument(doc.getString("target_component").getValue(), doc.getDocument("data"));
                     } else {
-                        response.append("components", new BsonDocument());
+                        componentsBson = new BsonDocument();
                     }
 
-                    return BsonUtil.toRawBsonDocument(response);
+                    return BsonUtil.toRawBsonDocument(new BsonDocument("components", componentsBson));
                 })
-                .onFailure().invoke(e -> logger.errorf("Failed to process ViewSnapshot request for ID: %s. Reason: %s", snapshotId, e.getMessage()));
-    }
-
-    private static byte[] toByteArray(RawBsonDocument doc) {
-        return AuditGrpcService.toByteArray(doc);
+                .onFailure().invoke(e -> logger.errorf("Failed to process decodeSnapshot request for ID: %s. Reason: %s", snapshotId.getValue(), e.getMessage()));
     }
 
 }

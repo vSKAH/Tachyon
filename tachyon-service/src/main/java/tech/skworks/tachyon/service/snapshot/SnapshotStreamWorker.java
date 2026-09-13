@@ -60,6 +60,9 @@ public class SnapshotStreamWorker {
     private ReactiveMongoCollection<Document> playersCollection;
     private Counter dlqCounter;
 
+    private int reclaimCycle = 0;
+
+
     public SnapshotStreamWorker(ReactiveRedisDataSource redisDS) {
         this.redisStream = redisDS.stream(String.class, String.class, byte[].class);
     }
@@ -74,9 +77,9 @@ public class SnapshotStreamWorker {
 
     @Scheduled(every = "1s", delay = 3L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     Uni<Void> processStream() {
-        return reclaimAbandoned()
-                .chain(this::readFresh)
-                .onFailure().invoke(e -> log.error("[SnapshotStreamWorker] Fatal error in stream processing loop.", e))
+        return readFresh()
+                .chain(() -> (++reclaimCycle >= 20) ? reclaimAbandoned() : Uni.createFrom().voidItem())
+                .onFailure().invoke(e -> log.error("[SnapshotStreamWorker] Error in audit stream loop", e))
                 .onFailure().recoverWithNull();
     }
 

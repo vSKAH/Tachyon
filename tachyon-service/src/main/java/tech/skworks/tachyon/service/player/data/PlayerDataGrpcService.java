@@ -36,6 +36,7 @@ import tech.skworks.tachyon.service.infra.health.TachyonWarmupService;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Objects;
 
@@ -104,6 +105,15 @@ public class PlayerDataGrpcService implements BindableService {
                             responseObserver::onError
                     );
                 }))
+                .addMethod(PlayerDataContract.PUSH_DLQ_BATCH_METHOD, ServerCalls.asyncUnaryCall((request, responseObserver) -> {
+                    pushDLQBatch(request).subscribe().with(
+                            response -> {
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                            },
+                            responseObserver::onError
+                    );
+                }))
                 .build();
     }
 
@@ -125,12 +135,12 @@ public class PlayerDataGrpcService implements BindableService {
 
         final var dirtyKey = PlayerDataUtils.dirty(uuid);
         final var stateKey = RedisKeys.state(uuid);
-        final var cacheKey = RedisKeys.cache(uuid);
+        final var cacheKey = PlayerDataUtils.cache(uuid);
 
         log.debugf("[PlayerDataGrpcService] pullProfile() called for %s.", uuid);
 
         //TODO: uses lua to acquire player
-        return redisKey.exists(dirtyKey).chain(isDirty -> {
+        return redisKey.exists(dirtyKey).<RawBsonDocument>chain(isDirty -> {
             if (isDirty) {
                 log.infof("[PlayerDataGrpcService] pullProfile() for %s blocked — DATA_DIRTY (save in progress).", uuid);
                 return Uni.createFrom().failure(Status.ABORTED.withDescription("DATA_DIRTY: Player data is currently being saved (Player: " + uuid + " )").asRuntimeException());
@@ -165,7 +175,7 @@ public class PlayerDataGrpcService implements BindableService {
 
                                 byte[] bytes = BsonUtil.toByteArray(response);
                                 log.infof("[PlayerDataGrpcService] MongoDB read successful for %s — caching (%d bytes).", uuid, bytes.length);
-                                return redisBytes.setex(cacheKey, RedisKeys.CACHE_TTL_SECONDS, bytes).replaceWith(response);
+                                return redisBytes.setex(cacheKey, PlayerDataUtils.CACHE_TTL_SECONDS, bytes).replaceWith(response);
                             })
                             .onFailure().invoke(() -> log.errorf("[PlayerDataGrpcService] MongoDB read failed for %s — releasing state.", uuid))
                             .onFailure().call(() -> redisKey.del(stateKey));
@@ -175,7 +185,7 @@ public class PlayerDataGrpcService implements BindableService {
             if (exception instanceof StatusRuntimeException sre && sre.getStatus().getCode() == Status.Code.ABORTED) {
                 return Uni.createFrom().voidItem();
             }
-            return redisKey.del(stateKey).onFailure().recoverWithItem(0);
+            return redisKey.del(stateKey).replaceWithVoid().onFailure().recoverWithNull();
         });
     }
 
@@ -192,13 +202,68 @@ public class PlayerDataGrpcService implements BindableService {
 
         log.debugf("[PlayerDataGrpcService] pushProfile() enqueuing save for %s (%d bytes).", uuid, requestDocumentBytes.length);
 
-        return redis.execute(Command.EVAL, PlayerDataUtils.DIRTY_INCREMENT_LUA, "1", dirtyKey, String.valueOf(RedisKeys.DIRTY_TTL_SECONDS))
+        return redis.execute(Command.EVAL, PlayerDataUtils.DIRTY_INCREMENT_LUA, "1", dirtyKey, String.valueOf(PlayerDataUtils.DIRTY_TTL_SECONDS))
                 .chain(() -> redisStream.xadd(config.streamKey(), STREAM_ARGS, Map.of("save_profile_payload", requestDocumentBytes)))
                 .invoke(id -> log.infof("[PlayerDataGrpcService] saveProfile() enqueued for %s (stream message id: %s).", uuid, id))
                 .replaceWith(Empty.INSTANCE)
                 .onFailure().invoke(exception -> log.errorf(exception, "[PlayerDataGrpcService] saveProfile() failed to enqueue for %s — decrement dirty key counter.", uuid))
-                .onFailure().call(() -> redis.execute(Command.EVAL, PlayerDataUtils.DIRTY_DECREMENT_LUA, "1", dirtyKey, String.valueOf(RedisKeys.DIRTY_TTL_SECONDS)))
+                .onFailure().call(() -> redis.execute(Command.EVAL, PlayerDataUtils.DIRTY_BATCH_DECREMENT_LUA, "1", dirtyKey, String.valueOf(PlayerDataUtils.DIRTY_TTL_SECONDS)))
                 .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Failed to enqueue profile into redis stream").asRuntimeException());
+    }
+
+    private Uni<Empty> pushDLQBatch(final @NotNull RawBsonDocument requestDocument) {
+        Objects.requireNonNull(requestDocument, "requestDocument cannot be null.");
+
+        if (!requestDocument.containsKey("profiles") || !requestDocument.isArray("profiles")) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("Missing or invalid 'profiles' field in request").asRuntimeException());
+        }
+
+        final var profilesArray = requestDocument.getArray("profiles");
+        if (profilesArray.isEmpty()) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("Empty 'profiles' field in request").asRuntimeException());
+        }
+
+        final var profilesUuids = new ArrayList<String>(profilesArray.size());
+        final var profilePayloads = new ArrayList<byte[]>(profilesArray.size());
+
+        for (final var bsonValue : profilesArray) {
+            if (!bsonValue.isDocument()) continue;
+            final var document = bsonValue.asDocument();
+            final var uuidField = PlayerDataContract.FIELD_UUID;
+            if (!document.containsKey(uuidField)) continue;
+            final var uuid = document.getString(uuidField).getValue();
+            profilesUuids.add(uuid);
+            profilePayloads.add(BsonUtil.toByteArray(document));
+        }
+
+        if (profilesUuids.isEmpty()) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("Empty 'profiles' field in request").asRuntimeException());
+        }
+
+        final var dirtyKeys = new ArrayList<String>(profilesUuids.size() + 3);
+        dirtyKeys.add(PlayerDataUtils.DIRTY_BATCH_INCREMENT_LUA);
+        dirtyKeys.add(String.valueOf(profilesUuids.size()));
+        for (final var uuid : profilesUuids) {
+            dirtyKeys.add(PlayerDataUtils.dirty(uuid));
+        }
+        dirtyKeys.add(String.valueOf(PlayerDataUtils.DIRTY_TTL_SECONDS));
+
+        log.infof("[PlayerDataGrpcService] DLQ Batch received for %d players(s). Adding to stream...", profilesUuids.size());
+        return redis.execute(Command.EVAL, dirtyKeys.toArray(String[]::new)).chain(() -> {
+            final var streamContent = new ArrayList<Uni<String>>(profilePayloads.size());
+            for (final var profilePayload : profilePayloads) {
+                streamContent.add(redisStream.xadd(config.streamKey(), STREAM_ARGS, Map.of("save_profile_payload", profilePayload)));
+            }
+            return Uni.combine().all().unis(streamContent).discardItems();
+        }).replaceWith(Empty.INSTANCE)
+                .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] Failed to process DLQ batch for %d player(s).", profilesUuids.size()))
+                .onFailure().call(() -> {
+                    final var rollbackKeys = new ArrayList<String>(dirtyKeys.size());
+                    rollbackKeys.add(PlayerDataUtils.DIRTY_BATCH_DECREMENT_LUA);
+                    rollbackKeys.addAll(dirtyKeys.subList(1, dirtyKeys.size()));
+                    return redis.execute(Command.EVAL, rollbackKeys.toArray(String[]::new)).replaceWithVoid().onFailure().recoverWithNull();
+                })
+                .onFailure().transform(e -> Status.UNAVAILABLE.withCause(e).withDescription("Failed to process DLQ batch in redis").asRuntimeException());
     }
 
     private Uni<RawBsonDocument> readFromMongo(final @NotNull String uuid) {

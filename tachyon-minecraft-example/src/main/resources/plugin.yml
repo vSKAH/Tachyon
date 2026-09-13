@@ -1,6 +1,7 @@
 name: Tachyon-Cookies
 version: '${project.version}'
 main: tech.skworks.tachyon.exampleplugin.TachyonCookies
+api-version: '1.13'
 depend: [Tachyon-Core]
 commands:
   cookie:

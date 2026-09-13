@@ -4,31 +4,42 @@ import io.grpc.CallOptions;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.ClientCalls;
-import org.bson.*;
+import org.bson.BsonDocument;
+import org.bson.BsonString;
+import org.bson.RawBsonDocument;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
-import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 import tech.skworks.tachyon.plugin.core.grpc.AbstractGrpcService;
-import tech.skworks.tachyon.plugin.core.util.TachyonLogger;
 import tech.skworks.tachyon.plugin.core.grpc.GrpcClient;
 import tech.skworks.tachyon.plugin.core.metric.scraper.TachyonMetrics;
 import tech.skworks.tachyon.plugin.core.resilience.ResilienceService;
+import tech.skworks.tachyon.plugin.core.util.TachyonLogger;
+import tech.skworks.tachyon.plugin.spigot.TachyonCore;
 
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Project Tachyon
- * Class ComponentService
+ * Short class explaination
+ * <p>
+ * Long class explaination with @link if needed
+ * </p>
  *
- * @author  Jimmy (vSKAH) - 07/04/2026
+ * <p><i>Project Tachyon</i></p>
+ *
+ * @author Jimmy (vSKAH) - 12/09/2026
  * @version 1.0
- * @since 1.0.0-SNAPSHOT
+ * @since 2.0.0-alpha.2
  */
 public class PlayerDataServiceImpl extends AbstractGrpcService implements PlayerDataService {
 
@@ -38,19 +49,24 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
 
     private final ExecutorService vThreadExecutor;
     private final Map<UUID, CompletableFuture<Void>> inFlightSaves;
+    private final PlayerDataDlqService dlqService;
 
-    public PlayerDataServiceImpl(final @NotNull ResilienceService resilience, final @Nullable TachyonMetrics tachyonMetrics, final @NotNull GrpcClient grpcClient) {
+    public PlayerDataServiceImpl(
+            @NotNull final ResilienceService resilience,
+            @Nullable final TachyonMetrics tachyonMetrics,
+            @NotNull final GrpcClient grpcClient,
+            @NotNull final PlayerDataDlqService dlqService
+    ) {
         super("player-data", resilience, tachyonMetrics, grpcClient);
 
         this.vThreadExecutor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("tachyon-playerdata-executor-", 1).factory());
         this.inFlightSaves = new ConcurrentHashMap<>();
+        this.dlqService = Objects.requireNonNull(dlqService, "dlqService cannot be null");
     }
-
-
-    //TODO: set all deadline grpc in configuration
 
     @Override
     public @Nullable BsonDocument tryPullProfile(@NotNull final UUID uuid) {
+        Objects.requireNonNull(uuid, "uuid cannot be null");
         final RawBsonDocument rawRequest = BsonUtil.toRawBsonDocument(new BsonDocument("uuid", new BsonString(uuid.toString())));
 
         try (var _ = startProfileLoadTimer()) {
@@ -64,7 +80,6 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
                                 rawRequest
                         );
                     }
-
                 } catch (StatusRuntimeException e) {
                     Status status = e.getStatus();
 
@@ -80,21 +95,24 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
                             return null;
                         }
 
-                        if (!sleepInterruptible(RETRY_BACKOFF_MS, uuid)) return null;
+                        if (!sleepInterruptible(RETRY_BACKOFF_MS, uuid)) {
+                            return null;
+                        }
                         continue;
                     }
 
                     if (status.getCode() == Status.Code.UNAVAILABLE && attempt < MAX_PULL_ATTEMPTS) {
                         String reason = status.getDescription() != null ? status.getDescription() : "UNAVAILABLE";
                         LOGGER.warn("tryPullProfile() backend unavailable (attempt {}/{}) for {} — reason: '{}'", attempt, MAX_PULL_ATTEMPTS, uuid, reason);
-                        if (!sleepInterruptible(RETRY_BACKOFF_MS / 2, uuid)) return null;
+                        if (!sleepInterruptible(RETRY_BACKOFF_MS / 2, uuid)) {
+                            return null;
+                        }
                         continue;
                     }
 
                     LOGGER.error("tryPullProfile() gRPC failure for {}: {} ({})", uuid, status.getCode(), status.getDescription());
                     recordError("PullProfile", status.getCode().name());
                     return null;
-
                 } catch (Exception e) {
                     LOGGER.error(e, "tryPullProfile() unexpected fatal failure for {}", uuid);
                     recordError("PullProfile", "FATAL");
@@ -106,7 +124,7 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
         return null;
     }
 
-    private boolean sleepInterruptible(long millis, UUID uuid) {
+    private boolean sleepInterruptible(final long millis, final UUID uuid) {
         try {
             Thread.sleep(millis);
             return true;
@@ -118,24 +136,22 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
     }
 
     private TachyonMetrics.MetricTimer startProfileLoadTimer() {
-        return tachyonMetrics != null ? tachyonMetrics.startProfileLoadTimer() : () -> {
-        };
+        return tachyonMetrics != null ? tachyonMetrics.startProfileLoadTimer() : () -> {};
     }
-
     private void recordPlayerLockRetry() {
         if (tachyonMetrics != null) {
             tachyonMetrics.recordPlayerLockRetry();
         }
     }
-
     private void recordPlayerLockExhausted() {
         if (tachyonMetrics != null) {
             tachyonMetrics.recordPlayerLockExhausted();
         }
     }
 
-
+    @Override
     public @NotNull CompletableFuture<Void> pushProfile(@NotNull final TachyonProfile tachyonProfile) {
+        Objects.requireNonNull(tachyonProfile, "tachyonProfile cannot be null");
         final var uuid = tachyonProfile.getUuid();
 
         if (!tachyonProfile.hasPendingChanges()) {
@@ -162,9 +178,9 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
         }
 
         final var uuid = tachyonProfile.getUuid();
-        final PushPayload payload = buildPushDocument(tachyonProfile);
+        final var entry = PlayerDataEntry.fromProfile(tachyonProfile);
 
-        if (payload.snapshotVersions.isEmpty()) {
+        if (entry.isEmpty()) {
             return CompletableFuture.completedFuture(null);
         }
 
@@ -173,57 +189,16 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
                     grpcClient.getChannel(),
                     PlayerDataContract.PUSH_PROFILE_METHOD,
                     CallOptions.DEFAULT.withDeadlineAfter(2, TimeUnit.SECONDS),
-                    payload.document
+                    entry.build()
             );
         }).whenComplete((_, throwable) -> {
             if (throwable == null) {
-                tachyonProfile.markAsClean(payload.snapshotVersions(), payload.deletedNames());
+                tachyonProfile.markAsClean(entry.getVersions(), entry.getRemoves());
             } else {
                 LOGGER.warn("Save profile failed for {} ({}) — routing to local recovery store.", uuid, throwable.getMessage());
-                //TODO: DLQ
+                dlqService.enqueue(entry);
             }
         });
-    }
-
-    private record PushPayload(RawBsonDocument document, Map<ComponentNamespace, Long> snapshotVersions, List<ComponentNamespace> deletedNames) {}
-
-    private @NotNull PushPayload buildPushDocument(@NotNull final TachyonProfile tachyonProfile) {
-        final var uuid = tachyonProfile.getUuid();
-        final var strUuid = uuid.toString();
-
-        final var rootDocument = new BsonDocument("uuid", new BsonString(strUuid));
-        final var saveDocument = new BsonDocument();
-        final var versionsDocument = new BsonDocument();
-        final var snapshotVersions = new HashMap<ComponentNamespace, Long>();
-
-        final var dirty = Map.copyOf(tachyonProfile.extractDirtyComponents());
-        dirty.forEach((namespace, document) -> {
-            final var namespaceKey = namespace.toString();
-            final var version = tachyonProfile.getVersion(namespace);
-
-            saveDocument.append(namespaceKey, document);
-            versionsDocument.append(namespaceKey, new BsonInt64(version));
-            snapshotVersions.put(namespace, version);
-        });
-        rootDocument.append("save", saveDocument);
-
-        final var removeArray = new BsonArray();
-        final var deleted = tachyonProfile.extractDeletedComponents();
-
-        deleted.forEach(name -> {
-            final var namespaceKey = name.fullNamespace();
-            long version = tachyonProfile.getVersion(name);
-
-            removeArray.add(new BsonString(namespaceKey));
-            versionsDocument.append(namespaceKey, new BsonInt64(version));
-            snapshotVersions.put(name, version);
-        });
-
-        rootDocument.append("remove", removeArray);
-        rootDocument.append("versions", versionsDocument);
-
-
-        return new PushPayload(BsonUtil.toRawBsonDocument(rootDocument), snapshotVersions, deleted);
     }
 
     @Override
@@ -232,7 +207,6 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
             future.completeExceptionally(ex);
         }
     }
-
 
     @Override
     public void shutdown() {
@@ -250,7 +224,6 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
             Thread.currentThread().interrupt();
             LOGGER.error(e, "Shutdown interrupted while waiting for network tasks.");
         }
-
 
         LOGGER.info("Shutdown complete.");
     }

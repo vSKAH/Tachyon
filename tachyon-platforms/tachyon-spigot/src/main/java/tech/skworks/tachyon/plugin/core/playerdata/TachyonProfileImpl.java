@@ -36,6 +36,8 @@ public class TachyonProfileImpl implements TachyonProfile {
         components.put(namespace, component);
         versions.put(namespace, version);
         sentVersions.put(namespace, version);
+        deleted.remove(namespace);
+
     }
 
     public <T extends Record> void initComponent(@NotNull final ComponentNamespace namespace, @NotNull final T component) {
@@ -46,6 +48,7 @@ public class TachyonProfileImpl implements TachyonProfile {
     public <T extends Record> void setComponent(@NotNull final ComponentNamespace namespace, @NotNull T component) {
         components.put(namespace, component);
         versions.merge(namespace, 1L, Long::sum);
+        deleted.remove(namespace);
     }
 
     @Override
@@ -132,16 +135,16 @@ public class TachyonProfileImpl implements TachyonProfile {
 
     @Override
     public @NotNull List<ComponentNamespace> extractDeletedComponents() {
-        List<ComponentNamespace> list = new ArrayList<>();
-        for (ComponentNamespace namespace : deleted) {
-            ComponentCodec<?> codec = registry.getCodec(namespace);
-            if (codec == null) {
-                LOGGER.warn("'extractDeletedComponents' No codec found for component {} ", namespace);
+        final var toDelete = new ArrayList<ComponentNamespace>(deleted.size());
+        for (final var namespace : deleted) {
+            if (components.containsKey(namespace)) {
                 continue;
             }
-            list.add(codec.getComponentNamespace());
+
+            final var codec = registry.getCodec(namespace);
+            if (codec != null) toDelete.add(codec.getComponentNamespace());
         }
-        return list;
+        return toDelete;
     }
 
     @Override
