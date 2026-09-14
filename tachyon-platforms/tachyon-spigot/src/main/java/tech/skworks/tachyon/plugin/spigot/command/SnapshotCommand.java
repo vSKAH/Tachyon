@@ -13,11 +13,13 @@ import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.snapshot.SnapshotService;
 import tech.skworks.tachyon.api.snapshot.SnapshotTriggerType;
 import tech.skworks.tachyon.plugin.spigot.TachyonCore;
-import tech.skworks.tachyon.plugin.spigot.ui.SnapshotUIManager;
+import tech.skworks.tachyon.plugin.spigot.ui.SnapshotUiContext;
+import tech.skworks.tachyon.plugin.spigot.ui.SnapshotUiService;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -32,10 +34,12 @@ public class SnapshotCommand implements TabExecutor {
 
     private final TachyonCore tachyonCore;
     private final SnapshotService snapshotService;
+    private final SnapshotUiService snapshotUiService;
 
-    public SnapshotCommand(TachyonCore tachyonCore) {
+    public SnapshotCommand(@NotNull final TachyonCore tachyonCore, @NotNull final SnapshotUiService snapshotUiService) {
         this.tachyonCore = tachyonCore;
         this.snapshotService = tachyonCore.getSnapshotService();
+        this.snapshotUiService = Objects.requireNonNull(snapshotUiService, "snapshotUiService cannot be null");
     }
 
     private void sendHelp(CommandSender sender) {
@@ -59,7 +63,7 @@ public class SnapshotCommand implements TabExecutor {
         final var componentNamespace = ComponentNamespace.parse(componentName);
         ComponentCodec<?> codec = tachyonCore.getComponentRegistry().getCodec(componentNamespace);
         if (codec == null) return null;
-        return (T) profile.getComponent(componentNamespace);
+        return profile.getComponent(componentNamespace);
     }
 
     private @Nullable OfflinePlayer getOfflinePlayer(@NotNull final String targetName) {
@@ -140,20 +144,23 @@ public class SnapshotCommand implements TabExecutor {
         return true;
     }
 
-    private void openSnapshotList(CommandSender sender, OfflinePlayer target) {
+    private void openSnapshotList(@NotNull final CommandSender sender,
+                                  @NotNull final OfflinePlayer target) {
         if (!(sender instanceof Player player)) {
             sender.sendMessage("§cOnly players can open the snapshot list");
             return;
         }
         sender.sendMessage("§eOpening snapshot history for " + target.getName() + "...");
-        SnapshotUIManager.openDayFoldersGui(tachyonCore, player, target);
+        snapshotUiService.openDayFolders(new SnapshotUiContext(player, target));
     }
 
-    private void takeFullSnapshot(CommandSender sender, String targetName, String targetUniqueId, String reason) {
+    private void takeFullSnapshot(final @NotNull CommandSender sender,
+                                  final @NotNull String targetName,
+                                  final @NotNull String targetUniqueId,
+                                  final @NotNull String reason) {
         sender.sendMessage("§7Initiating full snapshot for " + targetName + "...");
 
-        snapshotService.takeDatabaseSnapshot(targetUniqueId, reason, SnapshotTriggerType.MANUAL)
-                .whenComplete((v, ex) -> {
+        snapshotService.takeDatabaseSnapshot(targetUniqueId, reason, SnapshotTriggerType.MANUAL).whenComplete((_, ex) -> {
                     if (ex != null) {
                         sender.sendMessage("§cFailed to take full snapshot for " + targetName + ".");
                         return;
@@ -169,9 +176,6 @@ public class SnapshotCommand implements TabExecutor {
             sender.sendMessage("§cUnknown component or data unavailable: " + componentName);
             return;
         }
-
-   //     System.out.println("Component: " + component.toString());
-
 
         sender.sendMessage("§7Initiating component snapshot (" + componentName + ") for " + targetName + "...");
 

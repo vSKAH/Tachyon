@@ -5,16 +5,11 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import tech.skworks.tachyon.api.metrics.MetricsCollector;
 
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -31,9 +26,6 @@ import java.util.concurrent.atomic.AtomicLong;
 public class TachyonCollector extends MetricsCollector {
 
     private final MeterRegistry meterRegistry;
-    private final ScheduledExecutorService scheduler;
-
-    private static final Logger LOGGER = LoggerFactory.getLogger("Tachyon/TachyonMetrics");
 
     private final AtomicInteger profilesCount = new AtomicInteger(0);
     private final AtomicLong recoveryFileBytes = new AtomicLong(0);
@@ -44,7 +36,10 @@ public class TachyonCollector extends MetricsCollector {
 
     public TachyonCollector(@NotNull final MeterRegistry meterRegistry) {
         this.meterRegistry = Objects.requireNonNull(meterRegistry, "meterRegistry cannot be null");
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("scheduler-tachyon-metrics").factory());
+    }
+
+    public MeterRegistry getMeterRegistry() {
+        return meterRegistry;
     }
 
     @Override
@@ -58,22 +53,10 @@ public class TachyonCollector extends MetricsCollector {
         Gauge.builder("tachyon_plugin_recovery_pending_files", recoveryPendingFiles::get)
                 .register(meterRegistry);
 
-        this.scheduler.scheduleAtFixedRate(this::updateMetrics, 4, 4, TimeUnit.SECONDS);
     }
 
     @Override
     public void stop() {
-        if (scheduler != null) {
-            scheduler.shutdown();
-            try {
-                if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                    scheduler.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                LOGGER.error("Metrics scheduler shutdown interrupted.");
-            }
-        }
     }
 
     @FunctionalInterface

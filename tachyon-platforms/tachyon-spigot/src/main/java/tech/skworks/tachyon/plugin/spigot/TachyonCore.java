@@ -1,5 +1,6 @@
 package tech.skworks.tachyon.plugin.spigot;
 
+import com.tcoded.folialib.FoliaLib;
 import dev.faststats.Metrics;
 import dev.faststats.bukkit.BukkitContext;
 import org.bukkit.Bukkit;
@@ -7,7 +8,6 @@ import org.bukkit.command.PluginCommand;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.TachyonAPI;
 import tech.skworks.tachyon.api.audit.AuditService;
@@ -36,14 +36,13 @@ import tech.skworks.tachyon.core.system.HealthServiceImpl;
 import tech.skworks.tachyon.plugin.spigot.command.SnapshotCommand;
 import tech.skworks.tachyon.plugin.spigot.config.TachyonConfig;
 import tech.skworks.tachyon.plugin.spigot.listener.ConnectionListener;
+import tech.skworks.tachyon.plugin.spigot.metrics.VanillaMetrics;
+import tech.skworks.tachyon.plugin.spigot.ui.SnapshotUiService;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
 
 /**
  * Project Tachyon
@@ -76,7 +75,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
     private TachyonEventBusImpl<JavaPlugin> eventBus;
 
-    private BukkitTask autoSaveTask;
+    private ScheduledExecutorService autoSaveScheduler;
 
     private boolean tachyonDisabling;
 
@@ -110,10 +109,15 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
         getLogger().info("Grpc Services has been initialized.");
 
+        FoliaLib foliaLib = new FoliaLib(this);
+
+        this.metricsService.getMetricsRegistry().add(new VanillaMetrics(metricsService.getMeterRegistry(), foliaLib));
         this.metricsService.startMetricsCollection();
 
+        SnapshotUiService snapshotUiService = new SnapshotUiService(snapshotService, componentRegistry, foliaLib);
+
         getServer().getPluginManager().registerEvents(new ConnectionListener(this), this);
-        registerCommand("snapshot", new SnapshotCommand(this));
+        registerCommand("snapshot", new SnapshotCommand(this, snapshotUiService));
         getServer().getServicesManager().register(TachyonAPI.class, this, this, ServicePriority.Highest);
 
         this.healthService.startHealthMonitoring();
@@ -148,9 +152,16 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         this.fastStatsContext.shutdown();
         this.tachyonDisabling = true;
 
-        if (autoSaveTask != null) {
-            autoSaveTask.cancel();
-            autoSaveTask = null;
+        if (autoSaveScheduler != null) {
+            autoSaveScheduler.shutdown();
+            try {
+                if (!autoSaveScheduler.awaitTermination(3, TimeUnit.SECONDS)) {
+                    autoSaveScheduler.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                autoSaveScheduler.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
 
         if (tachyonProfileRegistry != null) {
@@ -199,20 +210,23 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
     private void scheduleAutoSave() {
         if (tachyonDisabling || tachyonProfileRegistry == null || playerDataService == null) return;
 
-        var playerDataConfig = config.playerDataConfig();
+        final var playerDataConfig = config.playerDataConfig();
         if (!playerDataConfig.enableDataAutoSave()) {
             getLogger().info("Auto-save is disabled — profiles will only be persisted on quit/shutdown.");
             return;
         }
 
-        final long intervalTicks = Math.max(1, playerDataConfig.dataAutoSaveDelay()) * 20L;
-        this.autoSaveTask = getServer().getScheduler().runTaskTimerAsynchronously(this, new AutoSaveTask(this.tachyonProfileRegistry, this.playerDataService,
-                this.playerDataDlqService, this.healthService), intervalTicks, intervalTicks);
+        final var delay = Math.max(2, playerDataConfig.dataAutoSaveDelay());
+        this.autoSaveScheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("tachyon-autosave-executor").factory());
+
+        this.autoSaveScheduler.scheduleAtFixedRate(
+                new AutoSaveTask(this.tachyonProfileRegistry, this.playerDataService, this.playerDataDlqService, this.healthService),
+                delay, delay, TimeUnit.SECONDS);
 
         getLogger().info(String.format("Auto-save enabled — flushing all dirty profiles every %ds.", playerDataConfig.dataAutoSaveDelay()));
     }
 
-    private void registerCommand(@NotNull final String commandName, @NotNull TabExecutor command) {
+    private void registerCommand(@NotNull final String commandName, final @NotNull TabExecutor command) {
         PluginCommand pluginCommand = getCommand(commandName);
 
         if (pluginCommand == null) {

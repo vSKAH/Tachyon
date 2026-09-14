@@ -155,6 +155,9 @@ public class MetricsServiceImpl implements MetricsService {
         }
     }
 
+    public PrometheusMeterRegistry getMeterRegistry() {
+        return prometheusMeterRegistry;
+    }
 
     @Override
     public boolean isRunning() {

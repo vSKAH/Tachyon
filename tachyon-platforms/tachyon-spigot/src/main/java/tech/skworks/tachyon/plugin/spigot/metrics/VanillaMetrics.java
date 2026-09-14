@@ -1,5 +1,6 @@
 package tech.skworks.tachyon.plugin.spigot.metrics;
 
+import com.tcoded.folialib.FoliaLib;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -21,6 +22,7 @@ import tech.skworks.tachyon.api.metrics.MetricsCollector;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -37,18 +39,22 @@ import java.util.logging.LogRecord;
  */
 public class VanillaMetrics extends MetricsCollector {
 
-    private final MeterRegistry registry;
-    private Handler errorAppender;
-    private Spark spark;
-
     private static final Logger LOGGER = LoggerFactory.getLogger("Tachyon/VanillaMetrics");
     private static long totalPlayers = 0;
 
-    private JvmGcMetrics jvmGcMetrics;
-    private final Map<String, Counter> logCounters = new ConcurrentHashMap<>();
+    private final MeterRegistry registry;
+    private final FoliaLib foliaLib;
+    private final Map<String, Counter> logCounters;
 
-    public VanillaMetrics(@NotNull final MeterRegistry meterRegistry) {
-        this.registry = meterRegistry;
+    private Handler errorAppender;
+    private Spark spark;
+
+    private JvmGcMetrics jvmGcMetrics;
+
+    public VanillaMetrics(@NotNull final MeterRegistry meterRegistry, @NotNull final FoliaLib foliaLib) {
+        this.registry = Objects.requireNonNull(meterRegistry, "meterRegistry cannot be null");
+        this.foliaLib = Objects.requireNonNull(foliaLib, "foliaLib cannot be null");
+        this.logCounters = new ConcurrentHashMap<>();
     }
 
     @Override
@@ -76,11 +82,15 @@ public class VanillaMetrics extends MetricsCollector {
                 .register(registry);
 
 
-        Gauge.builder("spigot_chunks_loaded", this::getTotalLoadedChunks)
-                .register(registry);
-
-        Gauge.builder("spigot_entities_loaded", this::getTotalEntities)
-                .register(registry);
+        //TODO: edit that to ensure folia compatibility
+        if (!foliaLib.isFolia()) {
+            Gauge.builder("spigot_chunks_loaded", this::getTotalLoadedChunks).register(registry);
+            Gauge.builder("spigot_entities_loaded", this::getTotalEntities).register(registry);
+        }
+        else {
+            Gauge.builder("spigot_chunks_loaded", () -> -1).register(registry);
+            Gauge.builder("spigot_entities_loaded", () -> -1).register(registry);
+        }
 
         if (Bukkit.getPluginManager().getPlugin("spark") == null) {
             LOGGER.warn("Spark plugin not found. Spark metrics will not be available.");
