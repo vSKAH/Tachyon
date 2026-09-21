@@ -40,12 +40,14 @@ public class PlayerSessionServiceImpl extends AbstractGrpcService implements Pla
     private final ExecutorService executor;
     private final ScheduledExecutorService scheduler;
 
-    public PlayerSessionServiceImpl(@NotNull final ResilienceService resilience,
-                                    @NotNull final GrpcClient grpcClient,
-                                    @NotNull final PlayerSessionConfig playerSessionConfig,
-                                    @NotNull final TachyonProfileRegistry tachyonProfileRegistry,
-                                    @Nullable final TachyonCollector tachyonCollector) {
-        super("player-session", resilience, grpcClient, tachyonCollector);
+    public PlayerSessionServiceImpl(
+            @NotNull final String serverId,
+            @NotNull final ResilienceService resilience,
+            @NotNull final GrpcClient grpcClient,
+            @NotNull final PlayerSessionConfig playerSessionConfig,
+            @NotNull final TachyonProfileRegistry tachyonProfileRegistry,
+            @Nullable final TachyonCollector tachyonCollector) {
+        super(serverId, "player-session", resilience, grpcClient, tachyonCollector);
         this.executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("tachyon-sessions-vthread-", 1).factory());
         this.scheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("tachyon-session-scheduler").factory());
         final var delay = playerSessionConfig.heartbeatSendDelay();
@@ -55,7 +57,7 @@ public class PlayerSessionServiceImpl extends AbstractGrpcService implements Pla
     }
 
     @Override
-    public void unlockPlayerProfile(@NotNull final UUID uuid, @NotNull final String playerName) {
+    public void unlockPlayerProfile(@NotNull final UUID uuid) {
         final var payload = BsonUtil.toRawBsonDocument(new BsonDocument("uuid", new BsonString(uuid.toString())));
         asyncRun(executor, LOGGER, "FreePlayer", () -> ClientCalls.blockingUnaryCall(
                 grpcClient.getChannel(),
@@ -63,9 +65,9 @@ public class PlayerSessionServiceImpl extends AbstractGrpcService implements Pla
                 CallOptions.DEFAULT.withDeadlineAfter(3, TimeUnit.SECONDS),
                 payload
         )).exceptionally(throwable -> {
-            LOGGER.error("Failed to unlock player {}", playerName, throwable);
+            LOGGER.error("Failed to unlock player {}", uuid, throwable);
             return null;
-        }).thenRun(() -> LOGGER.info("Unlocked player {}", playerName));
+        }).thenRun(() -> LOGGER.info("Unlocked player {}", uuid));
     }
 
     @Override
@@ -76,8 +78,10 @@ public class PlayerSessionServiceImpl extends AbstractGrpcService implements Pla
         for (TachyonProfile player : profiles) {
             uuidsArray.add(new BsonString(player.getUuid().toString()));
         }
-
-        final var payload = BsonUtil.toRawBsonDocument(new BsonDocument("uuids", new BsonArray(uuidsArray)));
+        final var rootDocument = new BsonDocument(2);
+        rootDocument.put("uuids", new BsonArray(uuidsArray));
+        rootDocument.put("server_id", new BsonString(getServerId()));
+        final var payload = BsonUtil.toRawBsonDocument(rootDocument);
 
         asyncRun(executor, LOGGER, "PlayerHeartBeatBatch", () -> ClientCalls.blockingUnaryCall(
                 grpcClient.getChannel(),
@@ -107,7 +111,7 @@ public class PlayerSessionServiceImpl extends AbstractGrpcService implements Pla
             case INVALID_ARGUMENT ->
                     LOGGER.error("[gRPC] Invalid payload sent during '{}'. Quarkus rejected the request: {}", actionName, description);
             case UNIMPLEMENTED ->
-                    //TODO: edit that
+                //TODO: edit that
                     LOGGER.error("[gRPC] Method not implemented on Quarkus during '{}'. Check your protobuf versions!", actionName);
             default ->
                     LOGGER.error("[gRPC] Unexpected error [{}] during '{}': {}", code.name(), actionName, description);

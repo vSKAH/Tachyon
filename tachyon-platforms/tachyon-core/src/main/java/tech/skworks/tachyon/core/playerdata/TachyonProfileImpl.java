@@ -12,6 +12,9 @@ import tech.skworks.tachyon.api.profile.TachyonProfile;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.UnaryOperator;
 
 public class TachyonProfileImpl implements TachyonProfile {
@@ -27,9 +30,20 @@ public class TachyonProfileImpl implements TachyonProfile {
     private final Map<ComponentNamespace, Long> versions = new ConcurrentHashMap<>();
     private final Map<ComponentNamespace, Long> sentVersions = new ConcurrentHashMap<>();
 
+    private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
+    private final Lock gameLock = rwLock.readLock();
+    private final Lock extractLock = rwLock.writeLock();
+
+    private AtomicBoolean freeze = new AtomicBoolean(false);
+
     public TachyonProfileImpl(final @NotNull UUID uuid, final @NotNull ComponentRegistry registry) {
         this.uuid = Objects.requireNonNull(uuid, "uuid cannot be null");
         this.registry = Objects.requireNonNull(registry, "registry cannot be null");
+    }
+
+    public void initVersion(@NotNull final ComponentNamespace namespace, final long version) {
+        this.versions.put(namespace, version);
+        this.sentVersions.put(namespace, version);
     }
 
     public <T extends Record> void initComponent(@NotNull final ComponentNamespace namespace, @NotNull final T component, final long version) {
@@ -46,86 +60,150 @@ public class TachyonProfileImpl implements TachyonProfile {
 
     @Override
     public <T extends Record> void setComponent(@NotNull final ComponentNamespace namespace, @NotNull T component) {
-        components.put(namespace, component);
-        versions.merge(namespace, 1L, Long::sum);
-        deleted.remove(namespace);
-    }
-
-    @Override
-    public <T extends Record> void updateComponent(@NotNull final ComponentNamespace componentNamespace, @NotNull final Class<T> clazz, @NotNull final UnaryOperator<T> modifier) {
-        Record updated = components.computeIfPresent(componentNamespace, (_, current) -> modifier.apply(clazz.cast(current)));
-        if (updated != null) {
-            versions.merge(componentNamespace, 1L, Long::sum);
+        gameLock.lock();
+        try {
+            if (freeze.get()) {
+                LOGGER.warn("Attempted to modify frozen profile {} (Component: {})", uuid, namespace);
+                return;
+            }
+            components.put(namespace, component);
+            versions.merge(namespace, 1L, Long::sum);
+            deleted.remove(namespace);
+        } finally {
+            gameLock.unlock();
         }
     }
 
     @Override
-    public <T extends Record> T getComponent(@NotNull final ComponentNamespace componentNamespace, @NotNull final T defaultValue) {
-        T value = getComponent(componentNamespace);
-        if (value != null) {
-            return value;
+    public <T extends Record> void updateComponent(@NotNull final ComponentNamespace namespace, @NotNull final Class<T> clazz, @NotNull final UnaryOperator<T> modifier) {
+        gameLock.lock();
+        try {
+            if (freeze.get()) {
+                LOGGER.warn("Attempted to modify frozen profile {} (Component: {})", uuid, namespace);
+                return;
+            }
+            Record updated = components.computeIfPresent(namespace, (_, current) -> modifier.apply(clazz.cast(current)));
+            if (updated != null) {
+                versions.merge(namespace, 1L, Long::sum);
+            }
+        } finally {
+            gameLock.unlock();
         }
-        setComponent(componentNamespace, defaultValue);
-        return defaultValue;
+    }
+
+    @Override
+    public <T extends Record> T getComponent(@NotNull final ComponentNamespace namespace, @NotNull final T defaultValue) {
+        gameLock.lock();
+        try {
+            Record component = components.get(namespace);
+            if (component != null) {
+                return (T) component;
+            }
+            if (freeze.get()) {
+                LOGGER.warn("Attempted to write default to frozen profile {} (Component: {})", uuid, namespace);
+                return defaultValue;
+            }
+            components.put(namespace, defaultValue);
+            versions.merge(namespace, 1L, Long::sum);
+            deleted.remove(namespace);
+            return defaultValue;
+        } finally {
+            gameLock.unlock();
+        }
     }
 
     @Override
     @SuppressWarnings("unchecked")
-    public @Nullable <T extends Record> T getComponent(@NotNull final ComponentNamespace componentNamespace) {
-        Record component = components.get(componentNamespace);
-        if (component == null) return null;
-        return (T) component;
+    public @Nullable <T extends Record> T getComponent(@NotNull final ComponentNamespace namespace) {
+        gameLock.lock();
+        try {
+            Record component = components.get(namespace);
+            if (component == null) return null;
+            return (T) component;
+        } finally {
+            gameLock.unlock();
+        }
     }
 
     @Override
-    public void removeComponent(@NotNull final ComponentNamespace componentNamespace) {
-        components.remove(componentNamespace);
-        versions.merge(componentNamespace, 1L, Long::sum);
-        deleted.add(componentNamespace);
+    public void removeComponent(@NotNull final ComponentNamespace namespace) {
+        gameLock.lock();
+        try {
+            if (freeze.get()) {
+                LOGGER.warn("Attempted to modify frozen profile {} (Component: {})", uuid, namespace);
+                return;
+            }
+            components.remove(namespace);
+            versions.merge(namespace, 1L, Long::sum);
+            deleted.add(namespace);
+        } finally {
+            gameLock.unlock();
+        }
+    }
+
+    public void freeze() {
+        extractLock.lock();
+        try {
+            this.freeze.set(true);
+        } finally {
+            extractLock.unlock();
+        }
+    }
+
+    public boolean isFrozen() {
+        return freeze.get();
     }
 
     @Override
     public boolean hasPendingChanges() {
-        if (!deleted.isEmpty()) return true;
-        for (final var entry : versions.entrySet()) {
-            final var lastSent = sentVersions.get(entry.getKey());
-            if (!Objects.equals(entry.getValue(), lastSent)) {
-                return true;
+        extractLock.lock();
+        try {
+            if (!deleted.isEmpty()) return true;
+            for (final var entry : versions.entrySet()) {
+                final var lastSent = sentVersions.get(entry.getKey());
+                if (!Objects.equals(entry.getValue(), lastSent)) {
+                    return true;
+                }
             }
+            return false;
+        } finally {
+            extractLock.unlock();
         }
-        return false;
     }
 
     @Override
     public @NotNull Map<ComponentNamespace, BsonDocument> extractDirtyComponents() {
-        Map<ComponentNamespace, BsonDocument> dirtyMap = new HashMap<>();
+        extractLock.lock();
+        try {
+            Map<ComponentNamespace, BsonDocument> dirtyMap = new HashMap<>();
 
-        for (final Map.Entry<ComponentNamespace, Long> entry : versions.entrySet()) {
-            final var componentNamespace = entry.getKey();
-            final var currentVersion = entry.getValue();
-            final var lastSentVersion = sentVersions.get(componentNamespace);
+            for (final Map.Entry<ComponentNamespace, Long> entry : versions.entrySet()) {
+                final var componentNamespace = entry.getKey();
+                final var currentVersion = entry.getValue();
+                final var lastSentVersion = sentVersions.get(componentNamespace);
 
-            if (Objects.equals(currentVersion, lastSentVersion)) {
-                continue;
+                if (Objects.equals(currentVersion, lastSentVersion)) {
+                    continue;
+                }
+
+                final Record component = components.get(componentNamespace);
+                if (component == null) {
+                    continue;
+                }
+
+                ComponentCodec<?> codec = registry.getCodec(componentNamespace);
+                if (codec == null) {
+                    LOGGER.warn("'extractDirtyComponents' No codec found for component {} ", componentNamespace);
+                    continue;
+                }
+
+                BsonDocument encoded = encodeUnchecked(codec, component);
+                dirtyMap.put(componentNamespace, encoded);
             }
-
-            final Record component = components.get(componentNamespace);
-            if (component == null) {
-                //versions.remove(clazz, currentVersion);
-                continue;
-            }
-
-            ComponentCodec<?> codec = registry.getCodec(componentNamespace);
-            if (codec == null) {
-                LOGGER.warn("'extractDirtyComponents' No codec found for component {} ", componentNamespace);
-                continue;
-            }
-
-            BsonDocument encoded = encodeUnchecked(codec, component);
-            dirtyMap.put(componentNamespace, encoded);
-          //  sentVersions.put(componentNamespace, currentVersion);
+            return dirtyMap;
+        } finally {
+            extractLock.unlock();
         }
-        return dirtyMap;
     }
 
     @SuppressWarnings("unchecked")
@@ -135,39 +213,47 @@ public class TachyonProfileImpl implements TachyonProfile {
 
     @Override
     public @NotNull List<ComponentNamespace> extractDeletedComponents() {
-        final var toDelete = new ArrayList<ComponentNamespace>(deleted.size());
-        for (final var namespace : deleted) {
-            if (components.containsKey(namespace)) {
-                continue;
-            }
+        extractLock.lock();
+        try {
+            final var toDelete = new ArrayList<ComponentNamespace>(deleted.size());
+            for (final var namespace : deleted) {
+                if (components.containsKey(namespace)) {
+                    continue;
+                }
 
-            final var codec = registry.getCodec(namespace);
-            if (codec != null) toDelete.add(codec.getComponentNamespace());
+                final var codec = registry.getCodec(namespace);
+                if (codec != null) toDelete.add(codec.getComponentNamespace());
+            }
+            return toDelete;
+        } finally {
+            extractLock.unlock();
         }
-        return toDelete;
     }
 
     @Override
     public void markAsClean(@NotNull final Map<ComponentNamespace, Long> confirmedVersions, @NotNull final Collection<ComponentNamespace> deletedNames) {
-
-        for (final var confirmedVersionsEntry : confirmedVersions.entrySet()) {
-            final var namespace = confirmedVersionsEntry.getKey();
-            final var codec = registry.getCodec(namespace);
-            if (codec != null) {
-                final var versionSent = confirmedVersionsEntry.getValue();
-                sentVersions.compute(namespace, (_, currentSent) -> currentSent == null ? versionSent : Math.max(currentSent, versionSent));
-            }
-        }
-
-        for (final var componentNamespace : deletedNames) {
-            final var codec = registry.getCodec(componentNamespace);
-            if (codec != null) {
-                if (!components.containsKey(componentNamespace)) {
-                    deleted.remove(componentNamespace);
+        extractLock.lock();
+        try {
+            for (final var confirmedVersionsEntry : confirmedVersions.entrySet()) {
+                final var namespace = confirmedVersionsEntry.getKey();
+                final var codec = registry.getCodec(namespace);
+                if (codec != null) {
+                    final var versionSent = confirmedVersionsEntry.getValue();
+                    sentVersions.compute(namespace, (_, currentSent) -> currentSent == null ? versionSent : Math.max(currentSent, versionSent));
                 }
             }
-        }
 
+            for (final var componentNamespace : deletedNames) {
+                final var codec = registry.getCodec(componentNamespace);
+                if (codec != null) {
+                    if (!components.containsKey(componentNamespace)) {
+                        deleted.remove(componentNamespace);
+                    }
+                }
+            }
+        } finally {
+            extractLock.unlock();
+        }
     }
 
     @Override
@@ -176,7 +262,12 @@ public class TachyonProfileImpl implements TachyonProfile {
     }
 
     public Long getVersion(@NotNull final ComponentNamespace namespace) {
-        ComponentCodec<?> codec = registry.getCodec(namespace);
-        return codec != null ? versions.getOrDefault(namespace, 1L) : 1L;
+        gameLock.lock();
+        try {
+            ComponentCodec<?> codec = registry.getCodec(namespace);
+            return codec != null ? versions.getOrDefault(namespace, 1L) : 1L;
+        } finally {
+            gameLock.unlock();
+        }
     }
 }

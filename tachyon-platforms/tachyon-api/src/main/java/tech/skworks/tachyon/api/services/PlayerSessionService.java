@@ -17,6 +17,6 @@ import java.util.UUID;
 public interface PlayerSessionService {
 
     void sendHeartBeats(@NotNull final Collection<TachyonProfile> profiles, boolean log);
-    void unlockPlayerProfile(@NotNull final UUID uuid, @NotNull final String playerName);
+    void unlockPlayerProfile(@NotNull final UUID uuid);
 
 }

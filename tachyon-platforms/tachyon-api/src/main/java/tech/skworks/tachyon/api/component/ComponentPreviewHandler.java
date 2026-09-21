@@ -1,5 +1,7 @@
 package tech.skworks.tachyon.api.component;
 
+import java.util.List;
+
 /**
  * Project Tachyon       
  * Interface ComponentPreviewHandler  
@@ -34,12 +36,13 @@ public interface ComponentPreviewHandler<T, R extends Record> {
      * Builds the detailed data display of the component from its Record instance.
      * <p>
      * This method takes the decoded business data record and transforms it into a structured set
-     * of visual elements. The returned array will be directly injected into the final
+     * of visual elements. The returned list will be directly injected into the final
      * inventory or preview menu (e.g., the exact layout of items in an Enderchest,
      * or a paginated list of statistics).
      *
      * @param record The Record instance containing the player data for this component.
-     * @return An array of visual objects (of type {@link T}) representing the complete and formatted content of the component.
+     * @return A list of visual objects (of type {@link T}) representing the complete and formatted content of the component.
      */
-    T[] buildComponentDataDisplay(R record);
+    List<T> buildComponentDataDisplay(R record);
+
 }

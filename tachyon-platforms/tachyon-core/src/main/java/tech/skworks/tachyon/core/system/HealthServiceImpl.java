@@ -42,7 +42,6 @@ public class HealthServiceImpl extends AbstractGrpcService implements HealthServ
     private static final long HEALTHY_INTERVAL_MS = 8000L;
     private static final long UNHEALTHY_INTERVAL_MS = 4000L;
 
-    private final String serverName;
     private final List<Runnable> recoveryCallbacks;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean pingInProgress;
@@ -51,12 +50,12 @@ public class HealthServiceImpl extends AbstractGrpcService implements HealthServ
     private volatile boolean healthy = true;
     private volatile boolean warmingUp = false;
 
-    public HealthServiceImpl(@NotNull final ResilienceService resilience,
-                             @NotNull final GrpcClient grpcClient,
-                             @NotNull final String serverName,
-                             @Nullable TachyonCollector tachyonCollector) {
-        super("health", resilience, grpcClient, tachyonCollector);
-        this.serverName = serverName;
+    public HealthServiceImpl(
+            @NotNull final String serverId,
+            @NotNull final ResilienceService resilience,
+            @NotNull final GrpcClient grpcClient,
+            @Nullable TachyonCollector tachyonCollector) {
+        super(serverId, "health", resilience, grpcClient, tachyonCollector);
         this.recoveryCallbacks = new CopyOnWriteArrayList<>();
         this.scheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofVirtual().name("tachyon-health-monitor-", 1).factory());
         this.pingInProgress = new AtomicBoolean(false);
@@ -96,7 +95,7 @@ public class HealthServiceImpl extends AbstractGrpcService implements HealthServ
         final long sendTime = System.currentTimeMillis();
         final var payload = BsonUtil.toRawBsonDocument(new BsonDocument()
                 .append("client_time", new BsonInt64(sendTime))
-                .append("server_name", new BsonString(serverName)));
+                .append("server_id", new BsonString(getServerId())));
 
         return asyncCall(scheduler, LOGGER, "pingBackend", () -> {
             var rawResponse = ClientCalls.blockingUnaryCall(

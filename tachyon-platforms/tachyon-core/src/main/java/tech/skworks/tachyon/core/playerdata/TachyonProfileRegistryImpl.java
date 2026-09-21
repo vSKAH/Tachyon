@@ -81,6 +81,12 @@ public class TachyonProfileRegistryImpl<PLUGIN> implements TachyonProfileRegistr
         final var componentsDocument = response.getDocument(componentsField);
         final var versionsDocument = response.getDocument(versionsField);
 
+        for (var versionEntry : versionsDocument.entrySet()) {
+            final var namespace = ComponentNamespace.parse(versionEntry.getKey());
+            final var version = versionEntry.getValue().asNumber().longValue();
+            profile.initVersion(namespace, version);
+        }
+
         for (var componentName : componentsDocument.keySet()) {
             if (!componentsDocument.isDocument(componentName)) {
                 LOGGER.error("{} is not a document", componentName);
@@ -127,7 +133,8 @@ public class TachyonProfileRegistryImpl<PLUGIN> implements TachyonProfileRegistr
     public void unloadProfile(@NotNull final UUID uuid, @NotNull final String reason) {
         TachyonProfile profile = remove(uuid);
         if (profile == null) return;
-        LOGGER.info("Profile unloaded for {}. Active profiles: {}", uuid, profiles.size());
+        profile.freeze();
+        LOGGER.info("Profile unloaded and frozen for {}. Active profiles: {}", uuid, profiles.size());
         if (tachyonCollector != null) tachyonCollector.updateProfilesCount(profiles.size());
         eventBus.post(new ProfileUnloadedEvent(uuid, profile, reason));
     }

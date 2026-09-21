@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -258,11 +259,11 @@ public class SnapshotUiService {
             return;
         }
 
-        final ItemStack[] previewItems = handler.buildComponentDataDisplay(component);
+        final List<ItemStack> previewItems = handler.buildComponentDataDisplay(component);
         final var guiTitle = "Preview: " + componentNamespace;
 
         final BaseGui baseGui;
-        if (previewItems.length > 45) {
+        if (previewItems.size() > 45) {
             final PaginatedGui paginatedGui = Gui.paginated()
                     .title(Component.text(guiTitle))
                     .rows(6)
@@ -287,9 +288,9 @@ public class SnapshotUiService {
                 }
             }
         } else {
-            for (int i = 0; i < previewItems.length; i++) {
-                if (previewItems[i] != null && previewItems[i].getType() != Material.AIR) {
-                    baseGui.setItem(i, new GuiItem(previewItems[i]));
+            for (ItemStack previewItem : previewItems) {
+                if (previewItem != null && previewItem.getType() != Material.AIR) {
+                    baseGui.addItem(new GuiItem(previewItem));
                 }
             }
         }

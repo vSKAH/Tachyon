@@ -48,12 +48,13 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
     private final PlayerDataDlqService dlqService;
 
     public PlayerDataServiceImpl(
+            @NotNull final String serverId,
             @NotNull final ResilienceService resilience,
             @NotNull final GrpcClient grpcClient,
             @NotNull final PlayerDataDlqService dlqService,
             @Nullable final TachyonCollector tachyonCollector
     ) {
-        super("player-data", resilience, grpcClient, tachyonCollector);
+        super(serverId, "player-data", resilience, grpcClient, tachyonCollector);
 
         this.vThreadExecutor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("tachyon-playerdata-executor-", 1).factory());
         this.inFlightSaves = new ConcurrentHashMap<>();
@@ -63,7 +64,7 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
     @Override
     public @Nullable BsonDocument tryPullProfile(@NotNull final UUID uuid) {
         Objects.requireNonNull(uuid, "uuid cannot be null");
-        final RawBsonDocument rawRequest = BsonUtil.toRawBsonDocument(new BsonDocument("uuid", new BsonString(uuid.toString())));
+        final RawBsonDocument rawRequest = BsonUtil.toRawBsonDocument(new BsonDocument("uuid", new BsonString(uuid.toString())).append("server_id", new BsonString(getServerId())));
 
         try (var _ = startProfileLoadTimer()) {
             for (int attempt = 1; attempt <= MAX_PULL_ATTEMPTS; attempt++) {
@@ -133,13 +134,16 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
     }
 
     private TachyonCollector.MetricTimer startProfileLoadTimer() {
-        return tachyonCollector != null ? tachyonCollector.startProfileLoadTimer() : () -> {};
+        return tachyonCollector != null ? tachyonCollector.startProfileLoadTimer() : () -> {
+        };
     }
+
     private void recordPlayerLockRetry() {
         if (tachyonCollector != null) {
             tachyonCollector.recordPlayerLockRetry();
         }
     }
+
     private void recordPlayerLockExhausted() {
         if (tachyonCollector != null) {
             tachyonCollector.recordPlayerLockExhausted();

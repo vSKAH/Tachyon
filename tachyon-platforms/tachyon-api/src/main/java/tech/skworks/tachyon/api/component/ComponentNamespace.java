@@ -43,11 +43,9 @@ public record ComponentNamespace(String pluginName, String componentName, String
         validateName(pluginName, "pluginName");
         validateName(componentName, "componentName");
 
-        String lowerPlugin = pluginName.toLowerCase(Locale.ROOT);
-        String lowerComponent = componentName.toLowerCase(Locale.ROOT);
-        String full = lowerPlugin + ":" + lowerComponent;
+        String full = pluginName + ":" + componentName;
 
-        return new ComponentNamespace(lowerPlugin, lowerComponent, full);
+        return new ComponentNamespace(pluginName, componentName, full);
     }
 
     /**

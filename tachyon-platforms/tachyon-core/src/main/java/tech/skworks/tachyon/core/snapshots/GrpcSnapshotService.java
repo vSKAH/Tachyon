@@ -46,11 +46,13 @@ public class GrpcSnapshotService extends AbstractGrpcService implements Snapshot
     private final ExecutorService executor;
     private final ComponentRegistry componentRegistry;
 
-    public GrpcSnapshotService(@NotNull final ResilienceService resilience,
-                               @NotNull final GrpcClient grpcClient,
-                               @NotNull final ComponentRegistry componentRegistry,
-                               @Nullable final TachyonCollector tachyonCollector) {
-        super("snapshot", resilience, grpcClient, tachyonCollector);
+    public GrpcSnapshotService(
+            @NotNull final String serverId,
+            @NotNull final ResilienceService resilience,
+            @NotNull final GrpcClient grpcClient,
+            @NotNull final ComponentRegistry componentRegistry,
+            @Nullable final TachyonCollector tachyonCollector) {
+        super(serverId, "snapshot", resilience, grpcClient, tachyonCollector);
         this.executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("tachyon-snapshot-executor-", 1).factory());
         this.componentRegistry = componentRegistry;
     }

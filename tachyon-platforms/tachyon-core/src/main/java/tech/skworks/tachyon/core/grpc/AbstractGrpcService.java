@@ -23,16 +23,22 @@ import java.util.function.Supplier;
  */
 public abstract class AbstractGrpcService {
 
+    protected final @NotNull String serverId;
     protected final @NotNull String serviceId;
     protected final @NotNull ResilienceService resilience;
     protected final @NotNull GrpcClient grpcClient;
     protected final @Nullable TachyonCollector tachyonCollector;
 
-    public AbstractGrpcService(@NotNull final String serviceId, @NotNull final ResilienceService resilience, @NotNull final GrpcClient grpcClient, @Nullable final TachyonCollector tachyonCollector) {
+    public AbstractGrpcService(@NotNull final String serverId, @NotNull final String serviceId, @NotNull final ResilienceService resilience, @NotNull final GrpcClient grpcClient, @Nullable final TachyonCollector tachyonCollector) {
+        this.serverId = serverId;
         this.serviceId = Objects.requireNonNull(serviceId, "serviceId cannot be null");
         this.resilience = Objects.requireNonNull(resilience, "resilience cannot be null");
         this.grpcClient = Objects.requireNonNull(grpcClient, "grpcClient cannot be null");
         this.tachyonCollector = tachyonCollector;
+    }
+
+    public @NotNull String getServerId() {
+        return serverId;
     }
 
     public @NotNull String getServiceId() {

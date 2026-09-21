@@ -44,8 +44,8 @@ public class GrpcAuditService extends AbstractGrpcService implements AuditServic
     private final int drainAmountPerCycle;
 
 
-    public GrpcAuditService(@NotNull ResilienceService resilience, @NotNull GrpcClient grpcClient, @NotNull AuditConfig auditConfig, @Nullable TachyonCollector tachyonMetrics) {
-        super("audit", resilience, grpcClient, tachyonMetrics);
+    public GrpcAuditService(@NotNull final String serverId, @NotNull ResilienceService resilience, @NotNull GrpcClient grpcClient, @NotNull AuditConfig auditConfig, @Nullable TachyonCollector tachyonMetrics) {
+        super(serverId, "audit", resilience, grpcClient, tachyonMetrics);
         this.isFlushing= new AtomicBoolean(false);
         this.buffer = new ConcurrentRingBuffer<>(auditConfig.bufferSize());
         this.drainAmountPerCycle = auditConfig.bufferDrainPerCycles();

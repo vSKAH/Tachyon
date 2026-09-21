@@ -7,20 +7,18 @@ import io.grpc.stub.ServerCalls;
 import io.quarkus.grpc.GrpcService;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
-import io.quarkus.redis.datasource.value.ReactiveValueCommands;
 import io.smallrye.common.annotation.NonBlocking;
 import io.smallrye.common.constraint.NotNull;
-import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import io.vertx.redis.client.Command;
 import jakarta.annotation.PostConstruct;
 import jakarta.inject.Inject;
-import org.bson.BsonValue;
 import org.bson.RawBsonDocument;
 import org.jboss.logging.Logger;
 import tech.skworks.tachyon.common.contract.PlayerSessionContract;
 import tech.skworks.tachyon.common.types.Empty;
-import tech.skworks.tachyon.service.util.RedisKeys;
+import tech.skworks.tachyon.service.player.RedisKeys;
+import tech.skworks.tachyon.service.player.RedisScripts;
 
 import java.util.ArrayList;
 
@@ -73,19 +71,25 @@ public class PlayerSessionGrpcService implements BindableService {
     }
 
     public Uni<Empty> playerHeartBeatBatch(@NotNull final RawBsonDocument request) {
+        if (!request.containsKey("server_id")) {
+            return Uni.createFrom().failure(Status.INVALID_ARGUMENT.withDescription("Missing 'server_id' field in document").asRuntimeException());
+        }
         if (!request.containsKey("uuids") || !request.isArray("uuids")) {
             return Uni.createFrom().item(Empty.INSTANCE);
         }
-        var uuids = request.getArray("uuids");
+        final var uuids = request.getArray("uuids");
         if (uuids.isEmpty()) return Uni.createFrom().item(Empty.INSTANCE);
 
-        final var stateKeys = new ArrayList<String>(uuids.size() + 3);
-        stateKeys.add(PlayerSessionUtils.HEARTBEAT_BATCH_LUA);
+        final var serverId = request.getString("server_id").getValue();
+
+        final var stateKeys = new ArrayList<String>(uuids.size() + 4);
+        stateKeys.add(RedisScripts.HEARTBEAT_BATCH_LUA);
         stateKeys.add(String.valueOf(uuids.size()));
         for (var uuid : uuids) {
-            stateKeys.add(RedisKeys.state(uuid.asString().getValue()));
+            stateKeys.add(RedisKeys.server(uuid.asString().getValue()));
         }
-        stateKeys.add(String.valueOf(RedisKeys.STATE_TTL_SECONDS));
+        stateKeys.add(RedisKeys.STATE_TTL_SECONDS_STRING);
+        stateKeys.add(serverId);
 
         return redis.execute(Command.EVAL, stateKeys.toArray(String[]::new))
                 .invoke(() -> log.debugf("[PlayerDataGrpcService] Heartbeat batch processed for %d player(s).", uuids.size()))
@@ -103,7 +107,7 @@ public class PlayerSessionGrpcService implements BindableService {
         final var uuid = request.getString("uuid").getValue();
         log.infof("[PlayerDataGrpcService] freePlayer() called for %s — releasing state.", uuid);
 
-        return redisKey.del(RedisKeys.state(uuid))
+        return redisKey.del(RedisKeys.server(uuid))
                 .invoke(deleted -> {
                     if (deleted != null && deleted > 0) log.infof("[PlayerDataGrpcService] State key deleted for %s.", uuid);
                     else log.debugf("[PlayerDataGrpcService] No state key found to delete for %s (already free).", uuid);

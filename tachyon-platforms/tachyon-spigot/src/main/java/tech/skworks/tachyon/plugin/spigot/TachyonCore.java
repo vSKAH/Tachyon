@@ -97,15 +97,15 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         this.resilienceService = new ResilienceService(metricsService.getTachyonCollector());
 
         this.grpcClient = GrpcClient.create(config.grpcClientConfig());
-        this.healthService = new HealthServiceImpl(resilienceService, grpcClient, config.serverName(), metricsService.getTachyonCollector());
+        this.healthService = new HealthServiceImpl(config.serverName(), resilienceService, grpcClient, metricsService.getTachyonCollector());
 
         if (!checkStartupBackendHealth()) return;
 
-        this.auditService = new GrpcAuditService(resilienceService, grpcClient, config.auditConfig(), metricsService.getTachyonCollector());
+        this.auditService = new GrpcAuditService(config.serverName(), resilienceService, grpcClient, config.auditConfig(), metricsService.getTachyonCollector());
         this.playerDataDlqService = new PlayerDataDlqService(getDataFolder(), grpcClient);
-        this.playerDataService = new PlayerDataServiceImpl(resilienceService, grpcClient, playerDataDlqService, metricsService.getTachyonCollector());
-        this.playerSessionService = new PlayerSessionServiceImpl(resilienceService, grpcClient, config.playerSessionConfig(), tachyonProfileRegistry, metricsService.getTachyonCollector());
-        this.snapshotService = new GrpcSnapshotService(resilienceService, grpcClient, componentRegistry, metricsService.getTachyonCollector());
+        this.playerDataService = new PlayerDataServiceImpl(config.serverName(), resilienceService, grpcClient, playerDataDlqService, metricsService.getTachyonCollector());
+        this.playerSessionService = new PlayerSessionServiceImpl(config.serverName(), resilienceService, grpcClient, config.playerSessionConfig(), tachyonProfileRegistry, metricsService.getTachyonCollector());
+        this.snapshotService = new GrpcSnapshotService(config.serverName(), resilienceService, grpcClient, componentRegistry, metricsService.getTachyonCollector());
 
         getLogger().info("Grpc Services has been initialized.");
 
@@ -173,12 +173,13 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
             List<CompletableFuture<Void>> saveFutures = new ArrayList<>(count);
 
             for (TachyonProfile profile : profiles) {
-                CompletableFuture<Void> safeSave = getPlayerDataService().pushProfile(profile)
+                CompletableFuture<Void> safeSaveAndUnlock = getPlayerDataService().pushProfile(profile)
+                        .thenRun(() -> getPlayerSessionService().unlockPlayerProfile(profile.getUuid()))
                         .exceptionally(ex -> {
                             getLogger().severe(String.format("saveProfile() failed at shutdown for %s: %s", profile.getUuid(), ex.getMessage()));
                             return null;
                         });
-                saveFutures.add(safeSave);
+                saveFutures.add(safeSaveAndUnlock);
             }
 
             try {

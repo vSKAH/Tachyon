@@ -23,8 +23,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
-import tech.skworks.tachyon.service.util.RedisKeys;
 import tech.skworks.tachyon.service.player.PlayerConfig;
+import tech.skworks.tachyon.service.player.RedisKeys;
+import tech.skworks.tachyon.service.player.RedisScripts;
 
 import java.time.Duration;
 import java.util.*;
@@ -336,23 +337,23 @@ class PlayerDataStreamWorker {
                     for (final RawBsonDocument updatedDocument : docs) {
                         final var uuid = updatedDocument.getString(PlayerDataContract.FIELD_UUID).getValue();
                         final var bytesToCache = BsonUtil.toByteArray(updatedDocument);
-                        setExpirationsUni.add(redisBytes.setex(PlayerDataUtils.cache(uuid), PlayerDataUtils.CACHE_TTL_SECONDS, bytesToCache).invoke(() -> log.debugf("[PlayerStreamWorker] Cache updated for %s (%d bytes).", uuid, bytesToCache.length)));
+                        setExpirationsUni.add(redisBytes.setex(RedisKeys.cache(uuid), RedisKeys.CACHE_TTL_SECONDS, bytesToCache).invoke(() -> log.debugf("[PlayerStreamWorker] Cache updated for %s (%d bytes).", uuid, bytesToCache.length)));
                     }
                     return setExpirationsUni.isEmpty() ? Uni.createFrom().voidItem() : Uni.combine().all().unis(setExpirationsUni).discardItems();
                 })
                 .onFailure().invoke(e -> log.errorf(e, "[PlayerStreamWorker] Failed to batch update cache for %d player(s).", uniqueUuids.size()))
                 .onFailure().recoverWithNull()
                 .eventually(() -> {
-                    final var dirtyKeys = uniqueUuids.stream().map(PlayerDataUtils::dirty).toList();
+                    final var dirtyKeys = uniqueUuids.stream().map(RedisKeys::dirty).toList();
                     if (dirtyKeys.isEmpty()) {
                         return Uni.createFrom().voidItem();
                     }
 
                     final var args = new ArrayList<String>(dirtyKeys.size() + 3);
-                    args.add(PlayerDataUtils.DIRTY_BATCH_DECREMENT_LUA);
+                    args.add(RedisScripts.DIRTY_BATCH_DECREMENT_LUA);
                     args.add(String.valueOf(dirtyKeys.size()));
                     args.addAll(dirtyKeys);
-                    args.add(String.valueOf(PlayerDataUtils.DIRTY_TTL_SECONDS));
+                    args.add(RedisKeys.DIRTY_TTL_SECONDS_STRING);
 
 
                     return redis.execute(Command.EVAL, args.toArray(String[]::new))

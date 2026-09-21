@@ -89,4 +89,17 @@ public interface TachyonProfile {
     UUID getUuid();
 
     Long getVersion(@NotNull final ComponentNamespace namespace);
+
+    /**
+     * Freezes the profile to prevent any subsequent mutation.
+     * Useful when evicting or unloading a profile to protect against delayed async tasks.
+     */
+    void freeze();
+
+    /**
+     * Returns whether this profile is frozen.
+     *
+     * @return true if the profile is frozen, false otherwise.
+     */
+    boolean isFrozen();
 }
