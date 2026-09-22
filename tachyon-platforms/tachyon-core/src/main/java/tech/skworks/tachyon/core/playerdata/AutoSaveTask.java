@@ -63,7 +63,7 @@ public class AutoSaveTask implements Runnable {
 
             if (!healthService.isHealthy()) {
                 for (final var profile : dirtyProfiles) {
-                    playerDataDlqService.enqueue(PlayerDataEntry.fromProfile(profile));
+                    playerDataDlqService.enqueue(PlayerDeltaAdapter.fromProfile(profile));
                 }
                 processing.set(false);
                 return;

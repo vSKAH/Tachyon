@@ -115,7 +115,7 @@ public class ConnectionListener implements Listener {
         TachyonProfile profile = profilesRegistry.getProfile(uuid);
 
         if (profile == null) {
-            LOGGER.error("Profile not found at disconnect for {} ({}) — cannot save.", player.getName(), uuid);
+            LOGGER.info("Profile not found at disconnect for {} ({}) — it was evicted during handoff ?", player.getName(), uuid);
             return;
         }
 
