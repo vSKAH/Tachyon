@@ -26,6 +26,7 @@ quarkus:
   http:
     host-enabled: true
     host: "0.0.0.0"
+    idle-timeout: PT0S
   application:
     name: "tachyon-primary"
   log:
