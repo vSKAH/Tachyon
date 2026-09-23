@@ -38,6 +38,19 @@ public class RedisKeys {
         return CACHE_PREFIX + uuid;
     }
 
+    private static final String HANDOFF_SERVER_PREFIX = "handoff:server:";
+    public static final int HANDOFF_SERVER_TTL_SECONDS = 60;
+
+    public static String handoffServer(@NotNull final String serverId) {
+        return HANDOFF_SERVER_PREFIX + serverId;
+    }
+
+    private static final String HANDOFF_CHANNEL_PREFIX = "handoff:channel:";
+
+    public static String handoffPodChannel(@NotNull final String podId) {
+        return HANDOFF_CHANNEL_PREFIX + podId;
+    }
+
     private RedisKeys() {}
 
 }
