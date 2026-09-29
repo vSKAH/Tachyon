@@ -31,7 +31,12 @@ public class TachyonCookies extends JavaPlugin {
         tachyon.getComponentRegistry().registerCodec(cookieCodec);
         tachyon.getComponentRegistry().registerPreviewHandler(CookieComponent.class, cookieCodec);
 
-        getCommand("cookie").setExecutor(new CookieCommand(this));
+        final var cookieCommand = new CookieCommand(this);
+        final var pluginCommand = getCommand("cookie");
+        if (pluginCommand != null) {
+            pluginCommand.setExecutor(cookieCommand);
+            pluginCommand.setTabCompleter(cookieCommand);
+        }
         getLogger().info("Cookie Clicker loaded !");
     }
 

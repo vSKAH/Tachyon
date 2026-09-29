@@ -10,6 +10,8 @@ import tech.skworks.tachyon.api.component.ComponentCodec;
 import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.component.ComponentPreviewHandler;
 
+import java.util.List;
+
 @Builder(toBuilder = true)
 public record CookieComponent(long cookiesAmount) {
 
@@ -26,7 +28,7 @@ public record CookieComponent(long cookiesAmount) {
 
     public static class CookieComponentCodec implements ComponentCodec<CookieComponent>, ComponentPreviewHandler<ItemStack, CookieComponent> {
 
-        private static final ComponentNamespace NAMESPACE = ComponentNamespace.of(NAMESPACE_GROUP, NAMESPACE_KEY);
+        public static final ComponentNamespace NAMESPACE = ComponentNamespace.of(NAMESPACE_GROUP, NAMESPACE_KEY);
         private static final ItemStack ICON_TEMPLATE = new ItemStack(Material.COOKIE);
 
         //to avoid issue between encoding and decoding it's recommended declare it one time.
@@ -60,14 +62,14 @@ public record CookieComponent(long cookiesAmount) {
         }
 
         @Override
-        public ItemStack[] buildComponentDataDisplay(CookieComponent record) {
+        public List<ItemStack> buildComponentDataDisplay(CookieComponent record) {
 
             ItemStack itemStack = new ItemStack(Material.COOKIE);
             ItemMeta meta = itemStack.getItemMeta();
             meta.setDisplayName(" Amount of Cookie: " + record.cookiesAmount());
             itemStack.setItemMeta(meta);
 
-            return new ItemStack[]{itemStack};
+            return List.of(itemStack);
         }
     }
 

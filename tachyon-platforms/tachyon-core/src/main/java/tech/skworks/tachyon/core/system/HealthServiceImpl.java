@@ -1,0 +1,233 @@
+package tech.skworks.tachyon.core.system;
+
+import io.grpc.CallOptions;
+import io.grpc.StatusRuntimeException;
+import io.grpc.stub.ClientCalls;
+import org.bson.BsonBoolean;
+import org.bson.BsonDocument;
+import org.bson.BsonInt64;
+import org.bson.BsonString;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import tech.skworks.tachyon.api.system.HealthService;
+import tech.skworks.tachyon.api.system.PingResponse;
+import tech.skworks.tachyon.common.BsonUtil;
+import tech.skworks.tachyon.common.contract.HealthContract;
+import tech.skworks.tachyon.core.grpc.AbstractGrpcService;
+import tech.skworks.tachyon.core.grpc.GrpcClient;
+import tech.skworks.tachyon.core.metric.scraper.TachyonCollector;
+import tech.skworks.tachyon.core.resilience.ResilienceService;
+
+import java.util.List;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * Project Tachyon
+ * Class GrpcSystemService
+ *
+ * <p>Handles core backend connectivity, gRPC ping telemetry, and autonomous adaptive health monitoring.</p>
+ *
+ * @author  Jimmy (vSKAH) - 08/04/2026
+ * @version 1.0
+ * @since 1.0.0-SNAPSHOT
+ */
+public class HealthServiceImpl extends AbstractGrpcService implements HealthService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("Tachyon/HealthService");
+    private static final PingResponse OFFLINE_FALLBACK = new PingResponse(-1, -1, "OFFLINE", false, false, false, false, 1000L);
+
+    private static final long HEALTHY_INTERVAL_MS = 8000L;
+    private static final long UNHEALTHY_INTERVAL_MS = 4000L;
+
+    private final List<Runnable> recoveryCallbacks;
+    private final List<Runnable> healthyProbeCallbacks;
+    private final ScheduledExecutorService scheduler;
+    private final AtomicBoolean pingInProgress;
+    private final AtomicBoolean monitoring;
+
+    private volatile boolean healthy = true;
+    private volatile boolean warmingUp = false;
+
+    public HealthServiceImpl(
+            @NotNull final String serverId,
+            @NotNull final ResilienceService resilience,
+            @NotNull final GrpcClient grpcClient,
+            @Nullable TachyonCollector tachyonCollector) {
+        super(serverId, "health", resilience, grpcClient, tachyonCollector);
+        this.recoveryCallbacks = new CopyOnWriteArrayList<>();
+        this.healthyProbeCallbacks = new CopyOnWriteArrayList<>();
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofVirtual().name("tachyon-health-monitor-", 1).factory());
+        this.pingInProgress = new AtomicBoolean(false);
+        this.monitoring = new AtomicBoolean(false);
+    }
+
+    public void registerRecoveryCallback(@NotNull final Runnable callback) {
+        this.recoveryCallbacks.add(callback);
+    }
+
+    public void registerHealthyProbeCallback(@NotNull final Runnable callback) {
+        this.healthyProbeCallbacks.add(callback);
+    }
+
+    public void startHealthMonitoring() {
+        if (!monitoring.compareAndSet(false, true)) return;
+        scheduleNextProbe(HEALTHY_INTERVAL_MS);
+    }
+
+    @Override
+    public boolean isHealthy() {
+        return healthy;
+    }
+
+    @Override
+    public boolean isWarmingUp() {
+        return warmingUp;
+    }
+
+    @Override
+    public boolean isReady() {
+        return healthy && !warmingUp;
+    }
+
+    @Override
+    public CompletableFuture<PingResponse> pingBackend() {
+        if (!pingInProgress.compareAndSet(false, true)) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        final long sendTime = System.currentTimeMillis();
+        final var payload = BsonUtil.toRawBsonDocument(new BsonDocument()
+                .append("client_time", new BsonInt64(sendTime))
+                .append("server_id", new BsonString(getServerId())));
+
+        return asyncCall(scheduler, LOGGER, "pingBackend", () -> {
+            var rawResponse = ClientCalls.blockingUnaryCall(
+                    grpcClient.getChannel(),
+                    HealthContract.PING_METHOD,
+                    CallOptions.DEFAULT.withDeadlineAfter(2, TimeUnit.SECONDS),
+                    payload
+            );
+
+            final long receiveTime = System.currentTimeMillis();
+
+            var typedResponse = new PingResponse(
+                    rawResponse.getInt64("client_time", new BsonInt64(sendTime)).getValue(),
+                    rawResponse.getInt64("server_time", new BsonInt64(-1)).getValue(),
+                    rawResponse.getString("tachyon_server_name", new BsonString("UNKNOWN")).getValue(),
+                    rawResponse.getBoolean("redis_online", new BsonBoolean(false)).getValue(),
+                    rawResponse.getBoolean("mongo_online", new BsonBoolean(false)).getValue(),
+                    rawResponse.getBoolean("healthy", new BsonBoolean(false)).getValue(),
+                    rawResponse.getBoolean("warming_up", new BsonBoolean(false)).getValue(),
+                    rawResponse.getInt64("warmup_remaining_ms", new BsonInt64(1000L)).getValue()
+            );
+
+            long rtt = typedResponse.roundTripLatencyMs(receiveTime);
+            long drift = typedResponse.clockDriftMs(receiveTime);
+
+            if (typedResponse.healthy()) {
+                LOGGER.info("Ping in {}ms (Drift: {}ms) from '{}' [Mongo: UP, Redis: UP]",
+                        rtt, drift, typedResponse.tachyonServerName());
+            } else {
+                LOGGER.warn("Ping in {}ms from '{}' — UNHEALTHY [Mongo: {}, Redis: {}]",
+                        rtt, typedResponse.tachyonServerName(),
+                        typedResponse.mongoOnline() ? "UP" : "DOWN",
+                        typedResponse.redisOnline() ? "UP" : "DOWN");
+            }
+
+            if (Math.abs(drift) > 2000) {
+                LOGGER.warn("Significant clock drift ({}ms) detected with backend node '{}'. Check NTP synchronization.",
+                        drift, typedResponse.tachyonServerName());
+            }
+
+            return typedResponse;
+
+        }).exceptionally(exception -> {
+            LOGGER.warn("Ping to backend failed or timed out: {}", exception.getMessage());
+            return OFFLINE_FALLBACK;
+        }).whenComplete((_, _) -> pingInProgress.set(false));
+    }
+
+    private void runHealthProbe() {
+        if (!monitoring.get()) return;
+
+        pingBackend().whenComplete((response, ex) -> {
+            final var isUp = (ex == null && response != null && response.healthy());
+            final var isWarmingUp = isUp && response.warmingUp();
+            updateHealthStatus(isUp, isWarmingUp);
+        });
+    }
+
+    private void updateHealthStatus(final boolean isUp, final boolean isWarmingUp) {
+        if (!monitoring.get()) return;
+
+        if (isUp) {
+            if (!healthy) {
+                LOGGER.info("Quarkus Backend is back ONLINE! Resuming normal 8s polling.");
+                healthy = true;
+                warmingUp = isWarmingUp;
+                resilience.setBackendHealthy(true);
+                for (Runnable callback : recoveryCallbacks) {
+                    try {
+                        callback.run();
+                    } catch (Exception e) {
+                        LOGGER.error("Error executing recovery callback following backend recovery.", e);
+                    }
+                }
+            }
+
+            for (final Runnable callback : healthyProbeCallbacks) {
+                try {
+                    callback.run();
+                } catch (Exception e) {
+                    LOGGER.warn("Error executing healthy probe callback: {}", e.getMessage());
+                }
+            }
+
+            scheduleNextProbe(HEALTHY_INTERVAL_MS);
+        } else {
+            if (healthy) {
+                LOGGER.error("Quarkus Backend is UNREACHABLE! Switching to fast 4s polling.");
+                healthy = false;
+                warmingUp = isWarmingUp;
+                resilience.setBackendHealthy(false);
+            }
+            scheduleNextProbe(UNHEALTHY_INTERVAL_MS);
+        }
+    }
+
+    private void scheduleNextProbe(long delayMillis) {
+        if (monitoring.get() && !scheduler.isShutdown()) {
+            scheduler.schedule(this::runHealthProbe, delayMillis, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    @Override
+    protected <T> void handleGrpcExceptions(@NotNull final String actionName, @NotNull final StatusRuntimeException exception, @NotNull final CompletableFuture<T> future) {
+        LOGGER.warn("[gRPC] {} during '{}'", exception.getStatus(), actionName);
+        if (!future.isDone()) {
+            future.completeExceptionally(exception);
+        }
+    }
+
+    @Override
+    public void shutdown() {
+        LOGGER.info("Shutting down GrpcSystemService...");
+        monitoring.set(false);
+        scheduler.shutdown();
+
+        try {
+            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("System scheduler did not terminate within 5s — forcing shutdownNow().");
+                scheduler.shutdownNow();
+            }
+            LOGGER.info("GrpcSystemService shutdown complete.");
+        } catch (InterruptedException e) {
+            scheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+            LOGGER.error("GrpcSystemService shutdown interrupted.", e);
+        }
+    }
+}

@@ -17,7 +17,6 @@ import java.nio.ByteBuffer;
 public class BsonMarshaller implements MethodDescriptor.Marshaller<RawBsonDocument> {
 
     public static final BsonMarshaller INSTANCE = new BsonMarshaller();
-    public static final RawBsonDocument EMPTY = toRawBsonDocument(new BsonDocument());
 
     @Override
     public InputStream stream(RawBsonDocument value) {
@@ -44,25 +43,13 @@ public class BsonMarshaller implements MethodDescriptor.Marshaller<RawBsonDocume
         }
     }
 
-    public static RawBsonDocument toRawBsonDocument(BsonDocument document) {
-        BasicOutputBuffer buffer = new BasicOutputBuffer();
-        try (BsonBinaryWriter writer = new BsonBinaryWriter(buffer)) {
-            new BsonDocumentCodec().encode(writer, document, EncoderContext.builder().build());
-        }
-        return new RawBsonDocument(buffer.toByteArray());
-    }
-
     private static final class BsonFastStream extends ByteArrayInputStream implements KnownLength, Drainable {
 
-        public BsonFastStream(byte[] buf) {
-            super(buf);
-        }
-
-        public RawBsonDocument toRawBsonDocument() {
+        private RawBsonDocument toRawBsonDocument() {
             return new RawBsonDocument(this.buf, this.pos, this.count - this.pos);
         }
 
-        public BsonFastStream(byte[] buf, int offset, int length) {
+        private BsonFastStream(byte[] buf, int offset, int length) {
             super(buf, offset, length);
         }
 

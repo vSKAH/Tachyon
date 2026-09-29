@@ -11,8 +11,8 @@ import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import org.bson.*;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.HealthContract;
-import tech.skworks.tachyon.common.marshaller.BsonMarshaller;
 
 /**
  * Project Tachyon
@@ -37,6 +37,9 @@ public class TachyonReadinessGrpcCheck implements BindableService {
 
     @Inject
     ReactiveRedisDataSource redisDS;
+
+    @Inject
+    TachyonWarmupService warmupService;
 
     private static final long HEALTH_CACHE_TTL_MS = 3000L;
     private volatile boolean cachedRedisUp = true;
@@ -95,8 +98,10 @@ public class TachyonReadinessGrpcCheck implements BindableService {
                 .append("tachyon_server_name", new BsonString(applicationName))
                 .append("redis_online", new BsonBoolean(redisUp))
                 .append("mongo_online", new BsonBoolean(mongoUp))
-                .append("healthy", new BsonBoolean(healthy));
+                .append("healthy", new BsonBoolean(healthy))
+                .append("warming_up", new BsonBoolean(warmupService.isWarmingUp()))
+                .append("warmup_remaining_ms", new BsonInt64(warmupService.getRemainingWarmupMs()));;
 
-        return BsonMarshaller.toRawBsonDocument(response);
+        return BsonUtil.toRawBsonDocument(response);
     }
 }

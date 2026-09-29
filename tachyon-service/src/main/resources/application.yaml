@@ -19,11 +19,14 @@ tachyon:
     retention-days: 7
     max-concurrent-uploads: 10
     throttle-seconds: 300
+  warmup:
+    duration: 30
 
 quarkus:
   http:
     host-enabled: true
     host: "0.0.0.0"
+    idle-timeout: PT0S
   application:
     name: "tachyon-primary"
   log:
@@ -43,6 +46,8 @@ quarkus:
     hosts:
       - "redis://:password@host:6000/1"
   mongodb:
+    tracing:
+      enabled: true
     connection-string: "mongodb://username:password@host:port/?tls=false"
     application-name: "tachyon-primary"
     database: "tachyon"
@@ -54,7 +59,7 @@ quarkus:
     max-connection-idle-time: "PT30S"
     write-concern:
       w: 1
-      journal: false
+      journal: true
     read-preference: "primaryPreferred"
   s3:
     endpoint-override: "https://your-s3.com"
@@ -73,7 +78,7 @@ quarkus:
         endpoint: "http://jaeger:4317"
     traces:
       sampler: "parentbased_traceidratio"
-      "sampler.arg": 0.05
+      "sampler.arg": 0.5
   micrometer:
     export:
       prometheus:

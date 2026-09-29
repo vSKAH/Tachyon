@@ -1,0 +1,13 @@
+name: Tachyon-Core
+description: Bridge between tachyon service and bukkit server
+version: '${project.version}'
+author: "vSKAH"
+folia-supported: true
+main: tech.skworks.tachyon.plugin.spigot.TachyonCore
+api-version: '1.13'
+softdepend:
+  - "spark"
+commands:
+  snapshot:
+    description: "Manage tachyon snapshot"
+    aliases: ["snapshots"]
