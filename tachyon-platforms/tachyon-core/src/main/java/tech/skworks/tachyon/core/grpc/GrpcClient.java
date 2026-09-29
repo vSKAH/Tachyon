@@ -56,9 +56,12 @@ public class GrpcClient implements Closeable {
                 .maxInboundMessageSize(config.getMaxInboundMessageSize())
                 .defaultLoadBalancingPolicy(config.getLoadBalancingPolicy());
 
-        builder.intercept(new  )
+        if (config.isUseToken()) {
+            builder.intercept(new ClientAuthentication(config.getToken()));
+        }
 
-            builder.disableRetry();
+
+        builder.disableRetry();
 
         this.channel = builder.build();
     }

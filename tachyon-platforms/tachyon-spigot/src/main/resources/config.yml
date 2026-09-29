@@ -23,6 +23,10 @@ grpc:
   # Whether to use TLS encryption for gRPC transport.
   use-tls: false
 
+  authentication:
+    use-bearer-token: true
+    bearer-token: "PLEASE CHANGE ME"
+
   keep-alive:
     # Time (in seconds) between keep-alive pings.
     time: 30
