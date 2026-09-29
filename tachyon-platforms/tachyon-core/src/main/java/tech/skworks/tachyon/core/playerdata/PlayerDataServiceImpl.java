@@ -179,10 +179,17 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
         }
 
         final var uuid = tachyonProfile.getUuid();
-        final var entry = PlayerDataEntry.fromProfile(tachyonProfile);
+        final var dirtyComponents = tachyonProfile.extractDirtyComponents();
+        final var deletedComponents = tachyonProfile.extractDeletedComponents();
+        final var delta = PlayerDeltaAdapter.fromProfile(tachyonProfile);
 
-        if (entry.isEmpty()) {
+        if (delta.isEmpty()) {
             return CompletableFuture.completedFuture(null);
+        }
+
+        final var versionSnapshots = new java.util.HashMap<tech.skworks.tachyon.api.component.ComponentNamespace, Long>();
+        for (final var namespace : dirtyComponents.keySet()) {
+            versionSnapshots.put(namespace, tachyonProfile.getVersion(namespace));
         }
 
         return asyncRun(vThreadExecutor, LOGGER, "SaveProfile", () -> {
@@ -190,14 +197,14 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
                     grpcClient.getChannel(),
                     PlayerDataContract.PUSH_PROFILE_METHOD,
                     CallOptions.DEFAULT.withDeadlineAfter(2, TimeUnit.SECONDS),
-                    entry.build()
+                    delta.toRawBsonDocument()
             );
         }).whenComplete((_, throwable) -> {
             if (throwable == null) {
-                tachyonProfile.markAsClean(entry.getVersions(), entry.getRemoves());
+                tachyonProfile.markAsClean(versionSnapshots, deletedComponents);
             } else {
                 LOGGER.warn("Save profile failed for {} ({}) — routing to local recovery store.", uuid, throwable.getMessage());
-                dlqService.enqueue(entry);
+                dlqService.enqueue(delta);
             }
         });
     }

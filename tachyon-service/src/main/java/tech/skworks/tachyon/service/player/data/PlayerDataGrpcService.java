@@ -29,12 +29,15 @@ import org.bson.conversions.Bson;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import tech.skworks.tachyon.common.BsonUtil;
+import tech.skworks.tachyon.common.contract.HandoffContract;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
+import tech.skworks.tachyon.common.player.PlayerProfileMerger;
 import tech.skworks.tachyon.common.types.Empty;
 import tech.skworks.tachyon.service.infra.health.TachyonWarmupService;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 import tech.skworks.tachyon.service.player.RedisKeys;
 import tech.skworks.tachyon.service.player.RedisScripts;
+import tech.skworks.tachyon.service.player.handoff.HandoffGrpcService;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -61,6 +64,10 @@ public class PlayerDataGrpcService implements BindableService {
 
     @Inject
     TachyonWarmupService warmupService;
+
+    @Inject
+    @GrpcService
+    HandoffGrpcService handoffService;
 
     @ConfigProperty(name = "quarkus.mongodb.database", defaultValue = "tachyon")
     String dbName;
@@ -167,8 +174,33 @@ public class PlayerDataGrpcService implements BindableService {
                             yield Uni.createFrom().failure(Status.ABORTED.withDescription("DATA_DIRTY: Save in progress").asRuntimeException());
                         }
                         case "HANDOFF" -> {
-                            log.infof("[PlayerDataGrpcService] Player %s active on '%s' (requested by '%s') — Handoff required.", uuid, owner, serverId);
-                            yield Uni.createFrom().failure(Status.ABORTED.withDescription("ALREADY_LOADED: Active on " + owner).asRuntimeException());
+                            log.infof("[PlayerDataGrpcService] Player %s active on '%s' (requested by '%s') — triggering live Handoff eviction...", uuid, owner, serverId);
+                            yield handoffService.requestEviction(owner, uuid)
+                                    .chain(evictResponse -> {
+                                        if (evictResponse == null || !evictResponse.containsKey(HandoffContract.FIELD_PAYLOAD)) {
+                                            log.warnf("[PlayerDataGrpcService] Handoff eviction timeout or failure for %s on '%s'.", uuid, owner);
+                                            return Uni.createFrom().failure(Status.ABORTED.withDescription("ALREADY_LOADED: Active on " + owner).asRuntimeException());
+                                        }
+
+                                        final BsonDocument dirtyPayload = evictResponse.getDocument(HandoffContract.FIELD_PAYLOAD);
+                                        final byte[] payloadBytes = BsonUtil.toByteArray(dirtyPayload);
+
+                                        final var pushStreamUni = redis.execute(Command.EVAL, RedisScripts.DIRTY_INCREMENT_LUA, "1", dirtyKey, RedisKeys.DIRTY_TTL_SECONDS_STRING)
+                                                .chain(() -> redisStream.xadd(config.streamKey(), STREAM_ARGS, Map.of("save_profile_payload", payloadBytes)))
+                                                .onFailure().invoke(e -> log.errorf(e, "[PlayerDataGrpcService] Failed to enqueue handoff dirty payload for %s.", uuid))
+                                                .replaceWithVoid()
+                                                .onFailure().recoverWithNull();
+
+                                        return pushStreamUni
+                                                .chain(() -> redisString.set(serverKey, serverId, new SetArgs().ex(RedisKeys.STATE_TTL_SECONDS)))
+                                                .chain(() -> loadPlayerData(cacheKey, uuid, serverKey))
+                                                .chain(baseProfile -> {
+                                                    final RawBsonDocument mergedProfile = PlayerProfileMerger.mergeDeltaIntoProfile(baseProfile, dirtyPayload);
+                                                    final byte[] mergedBytes = BsonUtil.toByteArray(mergedProfile);
+                                                    log.infof("[PlayerDataGrpcService] Merged handoff delta for %s — updating cache (%d bytes).", uuid, mergedBytes.length);
+                                                    return redisBytes.setex(cacheKey, RedisKeys.CACHE_TTL_SECONDS, mergedBytes).replaceWith(mergedProfile);
+                                                });
+                                    });
                         }
                         default -> Uni.createFrom().failure(Status.INTERNAL.withDescription("Unknown Lua status: " + status).asRuntimeException());
                     };

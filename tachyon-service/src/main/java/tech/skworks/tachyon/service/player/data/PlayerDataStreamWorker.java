@@ -9,6 +9,8 @@ import io.quarkus.redis.datasource.stream.ReactiveStreamCommands;
 import io.quarkus.redis.datasource.stream.StreamMessage;
 import io.quarkus.redis.datasource.stream.XReadGroupArgs;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
+import io.quarkus.runtime.ShutdownEvent;
+import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
 import io.smallrye.common.constraint.NotNull;
 import io.smallrye.common.constraint.Nullable;
@@ -16,6 +18,7 @@ import io.smallrye.mutiny.Uni;
 import io.vertx.redis.client.Command;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.bson.*;
 import org.bson.conversions.Bson;
@@ -23,6 +26,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
+import tech.skworks.tachyon.common.player.PlayerDelta;
+import tech.skworks.tachyon.common.player.PlayerProfileMerger;
 import tech.skworks.tachyon.service.player.PlayerConfig;
 import tech.skworks.tachyon.service.player.RedisKeys;
 import tech.skworks.tachyon.service.player.RedisScripts;
@@ -60,15 +65,14 @@ class PlayerDataStreamWorker {
 
     private ReactiveStreamCommands<String, String, byte[]> redisStream;
     private ReactiveValueCommands<String, byte[]> redisBytes;
-    private int reclaimCycle = 0;
 
     private ReactiveMongoCollection<Document> playersCollection;
     private ReactiveMongoCollection<RawBsonDocument> rawPlayersCollection;
 
+    private volatile boolean running = false;
 
     @PostConstruct
     void init() {
-
         this.redisStream = redis.stream(String.class, String.class, byte[].class);
         this.redisBytes = redis.value(byte[].class);
 
@@ -77,25 +81,52 @@ class PlayerDataStreamWorker {
         this.log.infof("[PlayerStreamWorker] Initialized with consumer ID '%s' on stream '%s'.", config.consumerId(), config.streamKey());
     }
 
-    @Scheduled(every = "1s", delay = 3L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
-    Uni<Void> processStream() {
-        return readFreshMessages()
-                .chain(() -> (++reclaimCycle >= 20) ? reclaimAbandonedMessages() : Uni.createFrom().voidItem())
-                .onFailure().invoke(e -> log.error("[PlayerStreamWorker] Error in stream processing loop.", e))
-                .onFailure().recoverWithNull();
+    void onStart(@Observes StartupEvent startupEvent) {
+        this.running = true;
+        log.infof("[PlayerStreamWorker] Starting continuous stream processor...");
+        startProcessing();
+    }
+
+
+    void onStop(@Observes ShutdownEvent event) {
+        this.running = false;
+        log.info("[PlayerStreamWorker] Stopping stream processor.");
     }
 
     private Uni<Void> readFreshMessages() {
-        return redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(200))
+        return redisStream.xreadgroup(config.streamGroupName(), config.consumerId(), config.streamKey(), ">", new XReadGroupArgs().count(200).block(Duration.ofSeconds(2)))
                 .chain(messages -> processAndAck(messages, "new"));
     }
 
-    private Uni<Void> reclaimAbandonedMessages() {
-        reclaimCycle = 0;
-        return redisStream.xautoclaim(config.streamKey(), config.streamGroupName(), config.consumerId(), Duration.ofSeconds(30), "0", 100)
-                .map(ClaimedMessages::getMessages)
-                .chain(messages -> processAndAck(messages, "reclaimed"));
+    private void startProcessing() {
+        if (!running) return;
+
+        readFreshMessages()
+                .onFailure().invoke(e -> log.error("[PlayerStreamWorker] Error in stream loop, retrying in 1s...", e))
+                .onFailure().retry().withBackOff(Duration.ofSeconds(1)).indefinitely()
+                .subscribe().with(_ -> {
+                    if (running) {
+                        startProcessing();
+                    }
+                });
     }
+
+    @Scheduled(every = "8s", delay = 10L, delayUnit = TimeUnit.SECONDS, concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    Uni<Void> reclaimAbandonedMessages() {
+        return redisStream.xautoclaim(
+                        config.streamKey(),
+                        config.streamGroupName(),
+                        config.consumerId(),
+                        Duration.ofSeconds(8),
+                        "0",
+                        100
+                )
+                .map(ClaimedMessages::getMessages)
+                .chain(messages -> processAndAck(messages, "reclaimed"))
+                .onFailure().invoke(e -> log.error("[PlayerStreamWorker] Error during reclaim cycle.", e))
+                .onFailure().recoverWithNull();
+    }
+
 
     private Uni<Void> processAndAck(final List<StreamMessage<String, String, byte[]>> messages, @NotNull final String origin) {
         if (messages == null || messages.isEmpty()) {
@@ -107,7 +138,7 @@ class PlayerDataStreamWorker {
         final var poisonMessagesToAck = new ArrayList<String>();
         final var validMessagesToAck = new ArrayList<String>();
         final var allValidUuids = new HashSet<String>();
-        final var updatesByUuid = new LinkedHashMap<String, PlayerUpdate>();
+        final var deltasByUuid = new LinkedHashMap<UUID, PlayerDelta>();
 
         for (final var message : messages) {
             final var payload = message.payload();
@@ -142,8 +173,9 @@ class PlayerDataStreamWorker {
             }
 
             try {
-                final var playerUpdate = updatesByUuid.computeIfAbsent(uuid, k -> new PlayerUpdate());
-                playerUpdate.apply(requestDocument);
+                final var playerUuid = UUID.fromString(uuid);
+                final var playerDelta = deltasByUuid.computeIfAbsent(playerUuid, PlayerDelta::new);
+                playerDelta.applyDeltaDocument(requestDocument);
                 allValidUuids.add(uuid);
                 validMessagesToAck.add(message.id());
             } catch (Exception e) {
@@ -165,11 +197,9 @@ class PlayerDataStreamWorker {
         }
 
         final var bulkOperations = new ArrayList<WriteModel<Document>>();
-        for (final var entry : updatesByUuid.entrySet()) {
-            final var uuid = entry.getKey();
-            final var playerUpdate = entry.getValue();
-            if (playerUpdate != null) {
-                bulkOperations.addAll(playerUpdate.toModels(uuid));
+        for (final var delta : deltasByUuid.values()) {
+            if (delta != null) {
+                bulkOperations.addAll(createMongoWriteModels(delta));
             }
         }
 
@@ -188,140 +218,66 @@ class PlayerDataStreamWorker {
         return ackPoisonUni.chain(() -> processValidUni);
     }
 
-    private static final class PlayerUpdate {
-        private final Map<String, BsonValue> componentSaves = new HashMap<>();
-        private final Map<String, Long> componentVersions = new HashMap<>();
-        private final Set<String> componentRemoves = new HashSet<>();
-
-        public void apply(@NotNull final RawBsonDocument requestDocument) {
-            Objects.requireNonNull(requestDocument, "requestDocument must not be null");
-
-            final var incomingVersions = extractVersions(requestDocument);
-            final var saveField = PlayerDataContract.FIELD_SAVE;
-
-            if (requestDocument.containsKey(saveField) && requestDocument.isDocument(saveField)) {
-                final var savesDocument = requestDocument.getDocument(saveField);
-                for (final var componentName : savesDocument.keySet()) {
-                    final var incomingVersion = incomingVersions.get(componentName);
-                    final var currentVersion = componentVersions.get(componentName);
-
-                    if (isStale(incomingVersion, currentVersion)) continue;
-
-                    componentSaves.put(componentName, savesDocument.get(componentName));
-
-                    componentRemoves.remove(componentName);
-                    if (incomingVersion != null) {
-                        componentVersions.put(componentName, incomingVersion);
-                    }
-                }
-            }
-
-            final var removeField = PlayerDataContract.FIELD_REMOVE;
-            if (requestDocument.containsKey(removeField) && requestDocument.isArray(removeField)) {
-                final var removeArray = requestDocument.getArray(removeField);
-
-                for (final var arrayElement : removeArray) {
-                    if (!arrayElement.isString()) continue;
-                    final var componentName = arrayElement.asString().getValue();
-                    final var incomingVersion = incomingVersions.get(componentName);
-                    final var currentVersion = componentVersions.get(componentName);
-
-                    if (isStale(incomingVersion, currentVersion)) continue;
-
-                    componentRemoves.add(componentName);
-                    componentSaves.remove(componentName);
-                    if (incomingVersion != null) {
-                        componentVersions.put(componentName, incomingVersion);
-                    }
-
-                }
-
-            }
+    private List<WriteModel<Document>> createMongoWriteModels(final @NotNull PlayerDelta delta) {
+        if (delta.isEmpty()) {
+            return List.of();
         }
 
-        public static boolean isStale(@Nullable final Long incomingVersion, @Nullable final Long currentVersion) {
-            return incomingVersion != null && currentVersion != null && incomingVersion <= currentVersion;
-        }
+        final var uuidString = delta.getPlayerUuid().toString();
+        final var saves = delta.getSaves();
+        final var removes = delta.getRemoves();
+        final var versions = delta.getVersions();
 
-        private static Bson buildVersionFilter(@NotNull final String uuid, @NotNull final String componentName, @Nullable final Long version) {
-            if (version == null) {
-                return Filters.eq(PlayerDataContract.FIELD_UUID, uuid);
-            }
+        final var models = new ArrayList<WriteModel<Document>>((saves.size() + removes.size()) * 2);
+
+        models.add(new UpdateOneModel<>(
+                Filters.eq(PlayerDataContract.FIELD_UUID, uuidString),
+                Updates.setOnInsert(PlayerDataContract.FIELD_UUID, uuidString),
+                new UpdateOptions().upsert(true)
+        ));
+
+        for (final var saveEntry : saves.entrySet()) {
+            final var componentName = saveEntry.getKey();
+            final var componentData = saveEntry.getValue();
+            final var componentVersion = versions.get(componentName);
+
+            final var filter = buildVersionFilter(uuidString, componentName, componentVersion);
+            final var specificComponentField = PlayerDataContract.FIELD_COMPONENTS + '.' + componentName;
             final var specificVersionField = PlayerDataContract.FIELD_VERSIONS + '.' + componentName;
-            return Filters.and(
-                    Filters.eq(PlayerDataContract.FIELD_UUID, uuid),
-                    Filters.or(Filters.exists(specificVersionField, false), Filters.lte(specificVersionField, version))
-            );
+
+            final Bson update = (componentVersion != null)
+                    ? Updates.combine(Updates.set(specificComponentField, componentData), Updates.set(specificVersionField, componentVersion))
+                    : Updates.set(specificComponentField, componentData);
+
+            models.add(new UpdateOneModel<>(filter, update, new UpdateOptions().upsert(false)));
         }
 
-        private static Map<String, Long> extractVersions(@NotNull final RawBsonDocument doc) {
-            final var versionsField = PlayerDataContract.FIELD_VERSIONS;
-            if (!doc.containsKey(versionsField) || !doc.isDocument(versionsField)) {
-                return Map.of();
-            }
-            final var versionsDoc = doc.getDocument(versionsField);
-            final var map = new HashMap<String, Long>(versionsDoc.size());
-            for (final var key : versionsDoc.keySet()) {
-                map.put(key, versionsDoc.getNumber(key).longValue());
-            }
-            return map;
+        for (final var componentName : removes) {
+            final var componentVersion = versions.get(componentName);
+            final var filter = buildVersionFilter(uuidString, componentName, componentVersion);
+
+            final var specificComponentField = PlayerDataContract.FIELD_COMPONENTS + '.' + componentName;
+            final var specificVersionField = PlayerDataContract.FIELD_VERSIONS + '.' + componentName;
+
+            final Bson update = (componentVersion != null)
+                    ? Updates.combine(Updates.unset(specificComponentField), Updates.set(specificVersionField, componentVersion))
+                    : Updates.unset(specificComponentField);
+
+            models.add(new UpdateOneModel<>(filter, update, new UpdateOptions().upsert(false)));
         }
 
-        public List<WriteModel<Document>> toModels(final @NotNull String uuid) {
+        return models;
+    }
 
-            if (componentSaves.isEmpty() && componentRemoves.isEmpty()) {
-                return List.of();
-            }
-
-            final var models = new ArrayList<WriteModel<Document>>((componentSaves.size() + componentRemoves.size()) * 2);
-
-            models.add(new UpdateOneModel<>(
-                    Filters.eq(PlayerDataContract.FIELD_UUID, uuid),
-                    Updates.setOnInsert(PlayerDataContract.FIELD_UUID, uuid),
-                    new UpdateOptions().upsert(true)
-            ));
-
-            for (final var saveEntry : componentSaves.entrySet()) {
-                final var componentName = saveEntry.getKey();
-                final var componentData = saveEntry.getValue();
-                final var componentVersion = componentVersions.get(componentName);
-
-                final var filter = buildVersionFilter(uuid, componentName, componentVersion);
-                Bson update;
-
-                final var specificComponentField = PlayerDataContract.FIELD_COMPONENTS + '.' + componentName;
-                final var specificVersionField = PlayerDataContract.FIELD_VERSIONS + '.' + componentName;
-
-                if (componentVersion != null) {
-                    update = Updates.combine(Updates.set(specificComponentField, componentData), Updates.set(specificVersionField, componentVersion));
-                } else {
-                    update = Updates.set(specificComponentField, componentData);
-                }
-                models.add(new UpdateOneModel<>(filter, update, new UpdateOptions().upsert(false)));
-            }
-
-            for (final var componentNameRemove : componentRemoves) {
-
-                final var componentVersion = componentVersions.get(componentNameRemove);
-                final var filter = buildVersionFilter(uuid, componentNameRemove, componentVersion);
-
-                Bson update;
-                final var specificComponentField = PlayerDataContract.FIELD_COMPONENTS + '.' + componentNameRemove;
-                final var specificVersionField = PlayerDataContract.FIELD_VERSIONS + '.' + componentNameRemove;
-
-                if (componentVersion != null)
-                    update = Updates.combine(Updates.unset(specificComponentField), Updates.set(specificVersionField, componentVersion));
-                else
-                    update = Updates.unset(specificComponentField);
-
-
-                models.add(new UpdateOneModel<>(filter, update, new UpdateOptions().upsert(false)));
-            }
-
-            return models;
+    private static Bson buildVersionFilter(final @NotNull String uuid, final @NotNull String componentName, final @Nullable Long version) {
+        if (version == null) {
+            return Filters.eq(PlayerDataContract.FIELD_UUID, uuid);
         }
-
-
+        final var specificVersionField = PlayerDataContract.FIELD_VERSIONS + '.' + componentName;
+        return Filters.and(
+                Filters.eq(PlayerDataContract.FIELD_UUID, uuid),
+                Filters.or(Filters.exists(specificVersionField, false), Filters.lte(specificVersionField, version))
+        );
     }
 
     private Uni<Void> updateCacheBatchAndUnlock(@NotNull final Collection<String> uuids) {

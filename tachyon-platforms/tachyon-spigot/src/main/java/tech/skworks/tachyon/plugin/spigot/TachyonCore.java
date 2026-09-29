@@ -29,6 +29,7 @@ import tech.skworks.tachyon.core.playerdata.AutoSaveTask;
 import tech.skworks.tachyon.core.playerdata.PlayerDataDlqService;
 import tech.skworks.tachyon.core.playerdata.PlayerDataServiceImpl;
 import tech.skworks.tachyon.core.playerdata.TachyonProfileRegistryImpl;
+import tech.skworks.tachyon.core.playerdata.handoff.HandoffClientManager;
 import tech.skworks.tachyon.core.playersession.PlayerSessionServiceImpl;
 import tech.skworks.tachyon.core.resilience.ResilienceService;
 import tech.skworks.tachyon.core.snapshots.GrpcSnapshotService;
@@ -72,6 +73,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
     private PlayerSessionServiceImpl playerSessionService;
     private GrpcSnapshotService snapshotService;
     private ResilienceService resilienceService;
+    private HandoffClientManager handoffClientManager;
 
     private TachyonEventBusImpl<JavaPlugin> eventBus;
 
@@ -98,16 +100,16 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
         this.grpcClient = GrpcClient.create(config.grpcClientConfig());
         this.healthService = new HealthServiceImpl(config.serverName(), resilienceService, grpcClient, metricsService.getTachyonCollector());
-
         if (!checkStartupBackendHealth()) return;
-
         this.auditService = new GrpcAuditService(config.serverName(), resilienceService, grpcClient, config.auditConfig(), metricsService.getTachyonCollector());
         this.playerDataDlqService = new PlayerDataDlqService(getDataFolder(), grpcClient);
         this.playerDataService = new PlayerDataServiceImpl(config.serverName(), resilienceService, grpcClient, playerDataDlqService, metricsService.getTachyonCollector());
+        this.handoffClientManager = new HandoffClientManager(config.serverName(), grpcClient, tachyonProfileRegistry);
         this.playerSessionService = new PlayerSessionServiceImpl(config.serverName(), resilienceService, grpcClient, config.playerSessionConfig(), tachyonProfileRegistry, metricsService.getTachyonCollector());
         this.snapshotService = new GrpcSnapshotService(config.serverName(), resilienceService, grpcClient, componentRegistry, metricsService.getTachyonCollector());
 
-        getLogger().info("Grpc Services has been initialized.");
+        this.handoffClientManager.start();
+        getLogger().info("Grpc Services have been initialized.");
 
         FoliaLib foliaLib = new FoliaLib(this);
 
@@ -122,6 +124,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
         this.healthService.startHealthMonitoring();
         this.healthService.registerRecoveryCallback(playerDataDlqService::replayAll);
+        this.healthService.registerHealthyProbeCallback(handoffClientManager::sendKeepAlive);
         this.tachyonDisabling = false;
         scheduleAutoSave();
         this.fastStatsContext.ready();
@@ -197,6 +200,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         }
 
         if (healthService != null) healthService.shutdown();
+        if (handoffClientManager != null) handoffClientManager.shutdown();
         if (auditService != null) auditService.shutdown();
         if (playerDataService != null) playerDataService.shutdown();
         if (playerDataDlqService != null) playerDataDlqService.shutdown();
@@ -306,5 +310,9 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
 
     public PlayerDataDlqService getPlayerDataDlqService() {
         return playerDataDlqService;
+    }
+
+    public HandoffClientManager getHandoffClientManager() {
+        return handoffClientManager;
     }
 }

@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
+import tech.skworks.tachyon.common.player.PlayerDelta;
 import tech.skworks.tachyon.core.grpc.GrpcClient;
 
 import java.io.File;
@@ -38,13 +39,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p><i>Project Tachyon</i></p>
  *
  * @author Jimmy (vSKAH) - 12/09/2026
- * @version 1.0
+ * @version 2.0
  * @since 2.0.0-alpha.2
  */
 public class PlayerDataDlqService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("Tachyon/PlayerDataDLQ");
-
     private static final int BATCH_SIZE = 30;
 
     private final Path datasDir;
@@ -52,7 +52,7 @@ public class PlayerDataDlqService {
 
     private final GrpcClient grpcClient;
     private final ExecutorService vThreadExecutor;
-    private final Map<UUID, PlayerDataEntry> stagging;
+    private final Map<UUID, PlayerDelta> staging;
     private final AtomicBoolean running;
 
     public PlayerDataDlqService(@NotNull final File dataFolder, @NotNull final GrpcClient grpcClient) {
@@ -62,12 +62,15 @@ public class PlayerDataDlqService {
         this.corruptedDataDir = recoveryDir.resolve("corrupted");
 
         this.grpcClient = Objects.requireNonNull(grpcClient, "grpcClient cannot be null");
-        this.vThreadExecutor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("tachyon-dlq-worker-", 1).factory());
-        this.stagging = new ConcurrentHashMap<>();
+        this.vThreadExecutor = Executors.newThreadPerTaskExecutor(
+                Thread.ofVirtual().name("tachyon-dlq-worker-", 1).factory()
+        );
+        this.staging = new ConcurrentHashMap<>();
         this.running = new AtomicBoolean(false);
 
         initStorages();
     }
+
     private void initStorages() {
         try {
             Files.createDirectories(this.datasDir);
@@ -77,20 +80,20 @@ public class PlayerDataDlqService {
         }
     }
 
-    private void save(@NotNull final PlayerDataEntry playerDataEntry) {
-        final var tmpFile = datasDir.resolve(playerDataEntry.getUuid() + ".tmp");
-        final var finalFile = datasDir.resolve(playerDataEntry.getUuid() + ".bson");
+    private void save(@NotNull final PlayerDelta playerDelta) {
+        final var tmpFile = datasDir.resolve(playerDelta.getPlayerUuid() + ".tmp");
+        final var finalFile = datasDir.resolve(playerDelta.getPlayerUuid() + ".bson");
 
         try {
-            final var bytes = BsonUtil.toByteArray(playerDataEntry.build());
+            final var bytes = BsonUtil.toByteArray(playerDelta.toRawBsonDocument());
             Files.write(tmpFile, bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
             Files.move(tmpFile, finalFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
-            LOGGER.error("Failed to save DLQ file for {}", playerDataEntry.getUuid(), e);
+            LOGGER.error("Failed to save DLQ file for {}", playerDelta.getPlayerUuid(), e);
         }
     }
 
-    private @Nullable PlayerDataEntry load(@NotNull final UUID uuid) {
+    private @Nullable PlayerDelta load(@NotNull final UUID uuid) {
         final var file = datasDir.resolve(uuid + ".bson");
         if (!Files.exists(file)) {
             return null;
@@ -98,9 +101,7 @@ public class PlayerDataDlqService {
         try {
             final var bytes = Files.readAllBytes(file);
             final var document = new RawBsonDocument(bytes);
-            final var entry = new PlayerDataEntry(uuid);
-            entry.merge(document);
-            return entry;
+            return PlayerDelta.fromBson(document);
         } catch (Exception e) {
             LOGGER.error("Failed to read DLQ file for {}, moving to corrupted", uuid, e);
             setCorrupted(file);
@@ -116,20 +117,20 @@ public class PlayerDataDlqService {
         }
     }
 
-    public @Nullable PlayerDataEntry getPending(@NotNull final UUID uuid) {
+    public @Nullable PlayerDelta getPending(@NotNull final UUID uuid) {
         Objects.requireNonNull(uuid, "uuid cannot be null");
-        final var loadedEntry = stagging.get(uuid);
+        final var loadedEntry = staging.get(uuid);
         return loadedEntry != null ? loadedEntry : load(uuid);
     }
 
-    public void enqueue(@NotNull final PlayerDataEntry newEntry) {
-        Objects.requireNonNull(newEntry, "newEntry cannot be null");
-        final var entry = stagging.compute(newEntry.getUuid(), (id, current) -> {
-            var value = (current != null) ? current : load(id);
+    public void enqueue(@NotNull final PlayerDelta newDelta) {
+        Objects.requireNonNull(newDelta, "newDelta cannot be null");
+        final var entry = staging.compute(newDelta.getPlayerUuid(), (id, current) -> {
+            final var value = (current != null) ? current : load(id);
             if (value == null) {
-                return newEntry;
+                return newDelta;
             }
-            value.merge(newEntry);
+            value.merge(newDelta);
             return value;
         });
 
@@ -140,13 +141,11 @@ public class PlayerDataDlqService {
         Objects.requireNonNull(uuid, "uuid cannot be null");
         Objects.requireNonNull(payload, "payload cannot be null");
 
-        final var entry = stagging.compute(uuid, (id, current) -> {
-            var value = (current != null) ? current : load(uuid);
-            if (value == null) {
-                value = new PlayerDataEntry(id);
-            }
-            value.merge(payload);
-            return value;
+        final var entry = staging.compute(uuid, (id, current) -> {
+            final var value = (current != null) ? current : load(id);
+            final var target = (value != null) ? value : new PlayerDelta(id);
+            target.applyDeltaDocument(payload);
+            return target;
         });
 
         vThreadExecutor.execute(() -> save(entry));
@@ -190,8 +189,8 @@ public class PlayerDataDlqService {
 
                         final var entry = getPending(uuid);
                         if (entry != null) {
-                            final long lastEdit = entry.getLastEdit();
-                            batchArray.add(entry.build());
+                            final long lastEdit = entry.getLastModifiedTimestamp();
+                            batchArray.add(entry.toRawBsonDocument());
                             batchEntries.add(new ReplayEntry(entry, lastEdit, file));
                         }
                     }
@@ -211,8 +210,8 @@ public class PlayerDataDlqService {
                         );
 
                         for (final var item : batchEntries) {
-                            if (item.entry().getLastEdit() == item.lastEdit()) {
-                                stagging.remove(item.entry().getUuid(), item.entry());
+                            if (item.delta().getLastModifiedTimestamp() == item.lastModifiedTimestamp()) {
+                                staging.remove(item.delta().getPlayerUuid(), item.delta());
                                 try {
                                     Files.deleteIfExists(item.file());
                                 } catch (IOException e) {
@@ -243,6 +242,6 @@ public class PlayerDataDlqService {
         }
     }
 
-    private record ReplayEntry(@NotNull PlayerDataEntry entry, long lastEdit, @NotNull Path file) {}
-
+    private record ReplayEntry(@NotNull PlayerDelta delta, long lastModifiedTimestamp, @NotNull Path file) {
+    }
 }

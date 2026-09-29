@@ -43,6 +43,7 @@ public class HealthServiceImpl extends AbstractGrpcService implements HealthServ
     private static final long UNHEALTHY_INTERVAL_MS = 4000L;
 
     private final List<Runnable> recoveryCallbacks;
+    private final List<Runnable> healthyProbeCallbacks;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean pingInProgress;
     private final AtomicBoolean monitoring;
@@ -57,6 +58,7 @@ public class HealthServiceImpl extends AbstractGrpcService implements HealthServ
             @Nullable TachyonCollector tachyonCollector) {
         super(serverId, "health", resilience, grpcClient, tachyonCollector);
         this.recoveryCallbacks = new CopyOnWriteArrayList<>();
+        this.healthyProbeCallbacks = new CopyOnWriteArrayList<>();
         this.scheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofVirtual().name("tachyon-health-monitor-", 1).factory());
         this.pingInProgress = new AtomicBoolean(false);
         this.monitoring = new AtomicBoolean(false);
@@ -64,6 +66,10 @@ public class HealthServiceImpl extends AbstractGrpcService implements HealthServ
 
     public void registerRecoveryCallback(@NotNull final Runnable callback) {
         this.recoveryCallbacks.add(callback);
+    }
+
+    public void registerHealthyProbeCallback(@NotNull final Runnable callback) {
+        this.healthyProbeCallbacks.add(callback);
     }
 
     public void startHealthMonitoring() {
@@ -122,7 +128,7 @@ public class HealthServiceImpl extends AbstractGrpcService implements HealthServ
             long drift = typedResponse.clockDriftMs(receiveTime);
 
             if (typedResponse.healthy()) {
-                LOGGER.debug("Ping in {}ms (Drift: {}ms) from '{}' [Mongo: UP, Redis: UP]",
+                LOGGER.info("Ping in {}ms (Drift: {}ms) from '{}' [Mongo: UP, Redis: UP]",
                         rtt, drift, typedResponse.tachyonServerName());
             } else {
                 LOGGER.warn("Ping in {}ms from '{}' — UNHEALTHY [Mongo: {}, Redis: {}]",
@@ -171,6 +177,15 @@ public class HealthServiceImpl extends AbstractGrpcService implements HealthServ
                     }
                 }
             }
+
+            for (final Runnable callback : healthyProbeCallbacks) {
+                try {
+                    callback.run();
+                } catch (Exception e) {
+                    LOGGER.warn("Error executing healthy probe callback: {}", e.getMessage());
+                }
+            }
+
             scheduleNextProbe(HEALTHY_INTERVAL_MS);
         } else {
             if (healthy) {
