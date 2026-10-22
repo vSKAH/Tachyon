@@ -1,5 +1,7 @@
 package tech.skworks.tachyon.core.grpc;
 
+import org.jetbrains.annotations.NotNull;
+
 import java.time.Duration;
 
 /**
@@ -28,7 +30,18 @@ public class GrpcClientConfig {
     private int maxInboundMessageSize = 32 * 1024 * 1024;
     private String loadBalancingPolicy = "round_robin";
 
+    private boolean useToken;
+    private String token;
+
+
     private boolean useVirtualThreads = true;
+
+    public GrpcClientConfig setBearerToken(final String bearerToken) {
+        if (bearerToken == null || bearerToken.isBlank()) return this;
+        this.useToken = true;
+        this.token =bearerToken;
+        return this;
+    }
 
     public GrpcClientConfig setAddress(String host, int port) {
         this.host = host;
@@ -113,5 +126,13 @@ public class GrpcClientConfig {
 
     public boolean isUseVirtualThreads() {
         return useVirtualThreads;
+    }
+
+    public boolean isUseToken() {
+        return useToken;
+    }
+
+    public String getToken() {
+        return token;
     }
 }

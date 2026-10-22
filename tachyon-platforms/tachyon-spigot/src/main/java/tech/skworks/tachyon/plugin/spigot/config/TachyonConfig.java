@@ -94,6 +94,12 @@ public record TachyonConfig(@NotNull String serverName, @NotNull GrpcClientConfi
         final boolean useVirtualThreads = section.getBoolean("use-virtual-threads", true);
         config.setUseVirtualThreads(useVirtualThreads);
 
+        final boolean useToken = section.getBoolean("authentication.use-bearer-token", false);
+        final String token = section.getString("authentication.bearer-token", "PLEASE CHANGE ME");
+
+        if (useToken)
+            config.setBearerToken(token);
+
         return config;
     }
 
