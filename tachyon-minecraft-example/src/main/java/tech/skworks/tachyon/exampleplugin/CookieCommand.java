@@ -75,18 +75,12 @@ public class CookieCommand implements TabExecutor {
             return true;
         }
 
-        final CookieComponent current = profile.getComponent(CookieComponent.CookieComponentCodec.NAMESPACE, new CookieComponent(0));
-        final long newAmount = current.cookiesAmount() + 1;
 
-        profile.updateComponent(
-                CookieComponent.CookieComponentCodec.NAMESPACE,
-                CookieComponent.class,
-                _ -> new CookieComponent(newAmount)
-        );
+        final var component = profile.updateComponent(CookieComponent.CookieComponentCodec.NAMESPACE, CookieComponent.class, () -> new CookieComponent(1), currentCookies -> new CookieComponent(currentCookies.cookiesAmount() + 1));
 
         this.tachyon.getAuditService().log(AuditEntry.of(playerId, "COOKIE_MODULE", "GAIN_COOKIES", "+1"));
         final Long version = profile.getVersion(CookieComponent.CookieComponentCodec.NAMESPACE);
-        player.sendMessage("§6+1 Cookie! §e(Total: " + newAmount + " §7| Version: " + version + "§e)");
+        player.sendMessage("§6+1 Cookie! §e(Total: " + component.cookiesAmount() + " §7| Version: " + version + "§e)");
         return true;
     }
 

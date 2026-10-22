@@ -15,6 +15,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
 public class TachyonProfileImpl implements TachyonProfile {
@@ -75,6 +77,7 @@ public class TachyonProfileImpl implements TachyonProfile {
     }
 
     @Override
+    @Deprecated(since = "2.0.0-alpha-2")
     public <T extends Record> void updateComponent(@NotNull final ComponentNamespace namespace, @NotNull final Class<T> clazz, @NotNull final UnaryOperator<T> modifier) {
         gameLock.lock();
         try {
@@ -92,25 +95,44 @@ public class TachyonProfileImpl implements TachyonProfile {
     }
 
     @Override
-    public <T extends Record> T getComponent(@NotNull final ComponentNamespace namespace, @NotNull final T defaultValue) {
+    public <T extends Record> T updateComponent(@NotNull final ComponentNamespace namespace, @NotNull final Class<T> clazz, @NotNull final Supplier<T> defaultSupplier, @NotNull final UnaryOperator<T> modifier) {
+        return computeComponent(namespace, clazz, current -> modifier.apply(current != null ? current : defaultSupplier.get()));
+    }
+
+    @Override
+    public <T extends Record> T computeComponent(@NotNull final ComponentNamespace namespace, @NotNull final Class<T> clazz, @NotNull final Function<@Nullable T, @NotNull T> remapper) {
         gameLock.lock();
         try {
-            Record component = components.get(namespace);
-            if (component != null) {
-                return (T) component;
-            }
             if (freeze.get()) {
-                LOGGER.warn("Attempted to write default to frozen profile {} (Component: {})", uuid, namespace);
-                return defaultValue;
+                LOGGER.warn("Attempted to modify frozen profile {} (Component: {})", uuid, namespace);
+                return null;
             }
-            components.put(namespace, defaultValue);
+            Record updated = components.compute(namespace, (_, current) -> {
+                T currentTyped = current != null ? clazz.cast(current) : null;
+                T result = remapper.apply(currentTyped);
+                return Objects.requireNonNull(result, "Remapper returned null for component: " + namespace);
+            });
             versions.merge(namespace, 1L, Long::sum);
             deleted.remove(namespace);
-            return defaultValue;
+            return clazz.cast(updated);
         } finally {
             gameLock.unlock();
         }
     }
+
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public <T extends Record> T getComponent(@NotNull final ComponentNamespace namespace, @NotNull final T defaultValue) {
+        gameLock.lock();
+        try {
+            Record component = components.get(namespace);
+            return component != null ? (T) component : defaultValue;
+        } finally {
+            gameLock.unlock();
+        }
+    }
+
 
     @Override
     @SuppressWarnings("unchecked")

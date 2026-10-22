@@ -9,6 +9,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
 /**
@@ -49,23 +51,58 @@ public interface TachyonProfile {
      * @param clazz    The class of the Record component to update
      * @param modifier  A function taking the current Record instance and returning a new updated Record instance.
      * @param <T>      The specific record comportnent type
+     * @deprecated Use {@link #updateComponent(ComponentNamespace, Class, Supplier, UnaryOperator)} or {@link #computeComponent(ComponentNamespace, Class, Function)} instead.
      */
+    @Deprecated(since = "2.0.0-alpha.2")
     <T extends Record> void updateComponent(@NotNull final ComponentNamespace componentNamespace, @NotNull final Class<T> clazz, @NotNull final UnaryOperator<T> modifier);
 
+
     /**
-     * Retrieves a component by its class type, returning a fallback value if it is not found.
+     * Atomically updates an existing Record component or initializes it using the provided fallback supplier.
+     * <p>
+     * If the component is present, {@code modifier} is applied to the current instance.
+     * If absent, {@code defaultSupplier} is lazily evaluated to provide an initial base state before applying {@code modifier}.
+     * Marks the component as dirty and increments its version counter.
+     * </p>
      *
-     * @param componentNamespace        The class of the component to retrieve.
-     * @param defaultValue The value to return if the player does not have this component loaded.
-     * @param <T>          The specific type of the Protobuf message.
-     * @return The current component instance, or the provided default value.
+     * @param namespace       The namespace of the component to update.
+     * @param clazz           The class of the Record component.
+     * @param defaultSupplier Lazy supplier invoked only if the component is absent (zero GC allocation if present).
+     * @param modifier        Function to apply to the current or base component.
+     * @param <T>             The specific Record component type.
+     * @return The newly stored Record instance.
      */
+    <T extends Record> T updateComponent(@NotNull final ComponentNamespace namespace, @NotNull final Class<T> clazz, @NotNull final Supplier<T> defaultSupplier, @NotNull final UnaryOperator<T> modifier);
+
+    /**
+     * Atomically computes a new Record component instance based on its current state.
+     * <p>
+     * The remapping function receives the current instance, or {@code null} if absent.
+     * Marks the component as dirty and increments its version counter.
+     * </p>
+     *
+     * @param namespace The namespace of the component to compute.
+     * @param clazz     The class of the Record component.
+     * @param mapper    Remapping function taking current nullable instance and returning new non-null instance.
+     * @param <T>       The specific Record component type.
+     * @return The newly stored Record instance.
+     */
+    <T extends Record> T computeComponent(@NotNull final ComponentNamespace namespace, @NotNull final Class<T> clazz, @NotNull final Function<@Nullable T, @NotNull T> mapper);
+
+        /**
+         * Retrieves a component by its class type, returning a fallback value if it is not found.
+         *
+         * @param componentNamespace        The class of the component to retrieve.
+         * @param defaultValue The value to return if the player does not have this component loaded.
+         * @param <T>          The specific type of the Protobuf message.
+         * @return The current component instance, or the provided default value.
+         */
     <T extends Record> T getComponent(@NotNull final ComponentNamespace componentNamespace, @NotNull final T defaultValue);
 
     /**
      * Retrieves a component by its class type.
      *
-     * @param ComponentNamespace The class of the component to retrieve.
+     * @param componentNamespace The class of the component to retrieve.
      * @param <T>   The specific type of the Protobuf message.
      * @return The current component instance, or {@code null} if not found.
      */
