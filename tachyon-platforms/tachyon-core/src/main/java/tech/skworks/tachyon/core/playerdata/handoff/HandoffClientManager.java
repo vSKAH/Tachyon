@@ -220,7 +220,7 @@ public class HandoffClientManager {
     }
 
     public void sendKeepAlive() {
-        if (!connected.get() || !running.get()) {
+        if (!isConnected()) {
             return;
         }
 

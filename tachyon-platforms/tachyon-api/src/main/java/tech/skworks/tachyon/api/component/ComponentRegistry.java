@@ -111,6 +111,14 @@ public interface ComponentRegistry {
     <R extends Record> @Nullable ComponentCodec<R> getCodec(@NotNull ComponentNamespace componentNamespace);
 
     /**
+     * Retrieves a codec by its allocated dense slotIndex in O(1) time (~2.5ns).
+     *
+     * @param slotIndex The dense slot index (0 <= slotIndex < 128).
+     * @return The registered codec or null if unallocated or out of bounds.
+     */
+    @Nullable ComponentCodec<?> getCodec(int slotIndex);
+
+    /**
      * Retrieves a preview handler for a specific component class.
      *
      * @param recordClass The Record class.

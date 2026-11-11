@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Supplier;
 
 /**
@@ -33,9 +34,10 @@ public class ComponentRegistryImpl implements ComponentRegistry {
     private final Map<Class<? extends Record>, ComponentCodec<? extends Record>> codecsByComponent = new ConcurrentHashMap<>();
     private final Map<Class<? extends Record>, ComponentPreviewHandler<?, ? extends Record>> previewHandlers = new ConcurrentHashMap<>();
 
-    // Dense slot indexation lookup structures
+    // Dense slot indexation lookup structures (O(1) lock-free array indexed)
     private final Map<ComponentNamespace, ComponentType<?>> typesByNamespace = new ConcurrentHashMap<>();
-    private final Map<Integer, ComponentType<?>> typesBySlot = new ConcurrentHashMap<>();
+    private final AtomicReferenceArray<ComponentType<?>> typesBySlot = new AtomicReferenceArray<>(MAX_SLOTS);
+    private final AtomicReferenceArray<ComponentCodec<?>> codecsBySlot = new AtomicReferenceArray<>(MAX_SLOTS);
     private final AtomicInteger slotCounter = new AtomicInteger(0);
 
     @Override
@@ -45,8 +47,9 @@ public class ComponentRegistryImpl implements ComponentRegistry {
         codecsByNamespace.put(codec.getComponentNamespace(), codec);
         codecsByComponent.put(codec.getComponentClass(), codec);
 
-        // Pre-allocate or link ComponentType
-        getOrCreateType(codec.getComponentNamespace(), codec.getComponentClass(), null);
+        // Pre-allocate or link ComponentType and associate slot codec in O(1)
+        final ComponentType<R> type = getOrCreateType(codec.getComponentNamespace(), codec.getComponentClass(), null);
+        codecsBySlot.set(type.slotIndex(), codec);
         LOGGER.info("Registered component codec: {}", codec.getComponentNamespace());
     }
 
@@ -79,7 +82,13 @@ public class ComponentRegistryImpl implements ComponentRegistry {
                 throw new IllegalStateException("Maximum component capacity (" + MAX_SLOTS + ") exceeded! Cannot register: " + ns);
             }
             final ComponentType<T> type = new ComponentType<>(slot, ns, recordClass, defaultSupplier);
-            typesBySlot.put(slot, type);
+            typesBySlot.set(slot, type);
+
+            final ComponentCodec<?> existingCodec = codecsByNamespace.get(ns);
+            if (existingCodec != null) {
+                codecsBySlot.set(slot, existingCodec);
+            }
+
             LOGGER.info("Allocated dense slot {} for component type: {}", slot, ns);
             return type;
         });
@@ -104,7 +113,18 @@ public class ComponentRegistryImpl implements ComponentRegistry {
 
     @Override
     public @Nullable ComponentType<?> getType(final int slotIndex) {
+        if (slotIndex < 0 || slotIndex >= MAX_SLOTS) {
+            return null;
+        }
         return typesBySlot.get(slotIndex);
+    }
+
+    @Override
+    public @Nullable ComponentCodec<?> getCodec(final int slotIndex) {
+        if (slotIndex < 0 || slotIndex >= MAX_SLOTS) {
+            return null;
+        }
+        return codecsBySlot.get(slotIndex);
     }
 
     @Override

@@ -48,7 +48,10 @@ public final class PlayerDeltaAdapter {
             if (slot.isDeleted() || slot.data() == null) {
                 delta.addRemove(namespace.fullNamespace(), version);
             } else {
-                final ComponentCodec<?> codec = registry.getCodec(namespace);
+                ComponentCodec<?> codec = registry.getCodec(slot.type().slotIndex());
+                if (codec == null) {
+                    codec = registry.getCodec(namespace);
+                }
                 if (codec != null) {
                     final BsonDocument doc = encodeUnchecked(codec, slot.data());
                     delta.addSave(namespace.fullNamespace(), doc, version);

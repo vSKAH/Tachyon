@@ -1,10 +1,14 @@
 package tech.skworks.tachyon.core.playerdata;
 
+import org.bson.BsonDocument;
+import org.bson.BsonInt64;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import tech.skworks.tachyon.api.component.ComponentCodec;
 import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.component.ComponentType;
+import tech.skworks.tachyon.common.player.PlayerDelta;
 import tech.skworks.tachyon.core.component.ComponentRegistryImpl;
 
 import java.util.UUID;
@@ -133,5 +137,55 @@ class TachyonProfileLockFreeTest {
         // T5: Remote ACK arrives for Version 2
         profile.confirmFlush(nextSnapshot);
         assertFalse(profile.hasPendingChanges(), "Profile must be clean after all versions confirmed!");
+    }
+
+    @Test
+    @DisplayName("Verify dense slot O(1) type and codec resolution in ComponentRegistry")
+    void testDenseSlotRegistryAndCodecLookup() {
+        assertEquals(coinsType, registry.getType(coinsType.slotIndex()));
+        assertEquals(statsType, registry.getType(statsType.slotIndex()));
+
+        // Out of bounds / unallocated slots safely return null
+        assertNull(registry.getType(-1));
+        assertNull(registry.getType(100));
+        assertNull(registry.getType(128));
+        assertNull(registry.getCodec(-1));
+        assertNull(registry.getCodec(100));
+        assertNull(registry.getCodec(128));
+
+        // Register dummy codec for coins
+        final ComponentCodec<TestCoins> dummyCodec = new ComponentCodec<>() {
+            @Override
+            public ComponentNamespace getComponentNamespace() {
+                return coinsType.namespace();
+            }
+
+            @Override
+            public Class<TestCoins> getComponentClass() {
+                return TestCoins.class;
+            }
+
+            @Override
+            public BsonDocument encode(TestCoins component) {
+                return new BsonDocument("amount", new BsonInt64(component.amount()));
+            }
+
+            @Override
+            public TestCoins decode(BsonDocument document) {
+                return new TestCoins(document.getInt64("amount").getValue());
+            }
+        };
+
+        registry.registerCodec(dummyCodec);
+
+        // Verify codec resolves via slotIndex in O(1)
+        assertSame(dummyCodec, registry.getCodec(coinsType.slotIndex()));
+
+        // Verify PlayerDeltaAdapter encodes correctly using the slot-indexed codec
+        profile.setComponent(coinsType, new TestCoins(42L));
+        final ProfileFlushBatch snapshot = profile.captureFlushBatch();
+        final PlayerDelta delta = PlayerDeltaAdapter.fromFlushBatch(snapshot, registry);
+        assertFalse(delta.isEmpty());
+        assertTrue(delta.getSaves().containsKey(coinsType.namespace().fullNamespace()));
     }
 }
