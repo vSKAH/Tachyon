@@ -4,61 +4,134 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
+import java.util.function.Supplier;
 
 /**
- * Project Tachyon
- * Interface ComponentRegistry
- *
- * <p> The central hub for managing and resolving all Protobuf components within the Tachyon ecosystem. </p>
+ * The central hub for managing and resolving all Protobuf and Record components within Tachyon.
  * <p>
- * This registry acts as the dictionary that bridges raw Protobuf data
- * with concrete Java objects and their associated graphical user interfaces (Preview Handlers).
- * It handles the dynamic unpacking of byte arrays into typed {@link Message} instances.
+ * Manages dense slot allocations, typed {@link ComponentKey} tokens, codecs, and GUI previews.
  * </p>
  *
- * @param <V> The visual object type used by the {@link ComponentPreviewHandler}
- * (e.g., {@code org.bukkit.inventory.ItemStack} for Spigot).
+ * <p><i>Project Tachyon</i></p>
  *
- * @author  Jimmy (vSKAH) - 18/04/2026
+ * @author Jimmy (vSKAH) - 18/04/2026
  * @version 2.0
  * @since 1.0.0-SNAPSHOT
  */
 public interface ComponentRegistry {
 
     /**
+     * Maximum number of concurrent component types supported by the dense slot indexing array.
+     */
+    int MAX_SUPPORTED_COMPONENTS = 128;
+
+    /**
+     * Registers a new typed component key with an optional default supplier.
+     *
+     * @param namespace       The canonical namespace of the component.
+     * @param type            The component record class.
+     * @param defaultSupplier Optional default supplier.
+     * @param <T>             The component record type.
+     * @return The registered ComponentKey with an assigned dense slotIndex.
+     */
+    <T extends Record> ComponentKey<T> registerKey(@NotNull ComponentNamespace namespace, @NotNull Class<T> type, @Nullable Supplier<T> defaultSupplier);
+
+    /**
+     * Registers a new typed component key without a default supplier.
+     *
+     * @param namespace The canonical namespace of the component.
+     * @param type      The component record class.
+     * @param <T>       The component record type.
+     * @return The registered ComponentKey with an assigned dense slotIndex.
+     */
+    default <T extends Record> ComponentKey<T> registerKey(@NotNull ComponentNamespace namespace, @NotNull Class<T> type) {
+        return registerKey(namespace, type, null);
+    }
+
+    /**
+     * Retrieves an existing ComponentKey by its namespace, or null if not registered.
+     *
+     * @param namespace The canonical namespace.
+     * @return The ComponentKey or null.
+     */
+    @Nullable ComponentKey<?> getKey(@NotNull ComponentNamespace namespace);
+
+    /**
+     * Retrieves an existing ComponentKey by its allocated dense slotIndex, or null.
+     *
+     * @param slotIndex The dense slot index (0 <= slotIndex < 128).
+     * @return The ComponentKey or null.
+     */
+    @Nullable ComponentKey<?> getKey(int slotIndex);
+
+    /**
+     * Retrieves an existing ComponentKey or registers a new one atomically.
+     *
+     * @param namespace       The canonical namespace of the component.
+     * @param type            The component record class.
+     * @param defaultSupplier Optional default supplier.
+     * @param <T>             The component record type.
+     * @return The existing or newly registered ComponentKey.
+     */
+    <T extends Record> ComponentKey<T> getOrCreateKey(@NotNull ComponentNamespace namespace, @NotNull Class<T> type, @Nullable Supplier<T> defaultSupplier);
+
+    /**
      * Registers a new ComponentCodec.
      *
-     * @param codec           The codec instance to register
-     * @param <R>             The specific record component type.
+     * @param codec The codec instance to register.
+     * @param <R>   The specific record component type.
      */
     <R extends Record> void registerCodec(@NotNull ComponentCodec<R> codec);
 
     /**
      * Registers a new visual preview handler for a specific component.
      *
-     * @param recordComponentClass The component record class
-     * @param previewHandler  The preview handler instance
-     * @param <V>             The visual element type (ex ItemStack)
-     * @param <R>             The record component type.
+     * @param recordComponentClass The component record class.
+     * @param previewHandler       The preview handler instance.
+     * @param <V>                  The visual element type (e.g. ItemStack).
+     * @param <R>                  The record component type.
      */
     <V, R extends Record> void registerPreviewHandler(@NotNull Class<R> recordComponentClass, @NotNull ComponentPreviewHandler<V, R> previewHandler);
-
 
     /**
      * Retrieves a codec by its component Record class.
      *
      * @param recordComponentClass The Record class.
      * @param <R>                  The Record component type.
-     * @return The registered codec or null if not found
-     **/
+     * @return The registered codec or null if not found.
+     */
     <R extends Record> @Nullable ComponentCodec<R> getCodec(Class<R> recordComponentClass);
 
-    <R extends Record> @Nullable ComponentCodec<R> getCodec(@NotNull final ComponentNamespace componentNamespace);
+    /**
+     * Retrieves a codec by its component namespace.
+     *
+     * @param componentNamespace The component namespace.
+     * @param <R>                The Record component type.
+     * @return The registered codec or null if not found.
+     */
+    <R extends Record> @Nullable ComponentCodec<R> getCodec(@NotNull ComponentNamespace componentNamespace);
 
-    <V, R extends Record >@Nullable ComponentPreviewHandler<V, R> getPreviewHandler(@NotNull final Class<R> recordClass);
+    /**
+     * Retrieves a preview handler for a specific component class.
+     *
+     * @param recordClass The Record class.
+     * @param <V>         The visual element type.
+     * @param <R>         The Record component type.
+     * @return The preview handler or null if not found.
+     */
+    <V, R extends Record> @Nullable ComponentPreviewHandler<V, R> getPreviewHandler(@NotNull Class<R> recordClass);
 
+    /**
+     * Returns the total number of registered codecs.
+     *
+     * @return Number of registered codecs.
+     */
     int registeredCount();
 
+    /**
+     * Returns an unmodifiable view of all registered codecs.
+     *
+     * @return All registered codecs.
+     */
     Collection<ComponentCodec<? extends Record>> getAllCodecs();
-
 }
