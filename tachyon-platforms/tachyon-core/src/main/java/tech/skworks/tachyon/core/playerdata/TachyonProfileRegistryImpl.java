@@ -85,9 +85,9 @@ public class TachyonProfileRegistryImpl<PLUGIN> implements TachyonProfileRegistr
         for (var versionEntry : versionsDocument.entrySet()) {
             final var namespace = ComponentNamespace.parse(versionEntry.getKey());
             final var version = versionEntry.getValue().asNumber().longValue();
-            final var key = componentRegistry.getKey(namespace);
-            if (key != null) {
-                profile.initVersion(key, version);
+            final var type = componentRegistry.getType(namespace);
+            if (type != null) {
+                profile.initVersion(type, version);
             }
         }
 
@@ -111,8 +111,8 @@ public class TachyonProfileRegistryImpl<PLUGIN> implements TachyonProfileRegistr
 
             try {
                 final var component = componentCodec.decode(componentBson);
-                final var key = componentRegistry.getOrCreateKey(namespace, componentCodec.getComponentClass(), null);
-                profile.initComponent(key, component, version);
+                final var type = componentRegistry.getOrCreateType(namespace, componentCodec.getComponentClass(), null);
+                profile.initComponent(type, component, version);
                 loaded++;
             } catch (Exception e) {
                 LOGGER.error("Failed to load component {} for player {}.", componentName, uuid, e);

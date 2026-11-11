@@ -8,8 +8,8 @@ import org.bukkit.util.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.component.ComponentCodec;
-import tech.skworks.tachyon.api.component.ComponentKey;
 import tech.skworks.tachyon.api.component.ComponentNamespace;
+import tech.skworks.tachyon.api.component.ComponentType;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.snapshot.SnapshotService;
 import tech.skworks.tachyon.api.snapshot.SnapshotTriggerType;
@@ -63,9 +63,9 @@ public class SnapshotCommand implements TabExecutor {
         final TachyonProfile profile = tachyonCore.getTachyonProfileRegistry().getProfile(uuid);
         if (profile == null) return null;
         final var componentNamespace = ComponentNamespace.parse(componentName);
-        final ComponentKey<?> key = tachyonCore.getComponentRegistry().getKey(componentNamespace);
-        if (key == null) return null;
-        return (T) profile.getComponent((ComponentKey<Record>) key);
+        final ComponentType<?> type = tachyonCore.getComponentRegistry().getType(componentNamespace);
+        if (type == null) return null;
+        return (T) profile.getComponent((ComponentType<Record>) type);
     }
 
     private @Nullable OfflinePlayer getOfflinePlayer(@NotNull final String targetName) {

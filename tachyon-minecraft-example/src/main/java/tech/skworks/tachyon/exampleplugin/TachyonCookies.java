@@ -3,7 +3,7 @@ package tech.skworks.tachyon.exampleplugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import tech.skworks.tachyon.api.TachyonAPI;
-import tech.skworks.tachyon.api.component.ComponentKey;
+import tech.skworks.tachyon.api.component.ComponentType;
 import tech.skworks.tachyon.exampleplugin.component.CookieComponent;
 
 /**
@@ -16,7 +16,7 @@ import tech.skworks.tachyon.exampleplugin.component.CookieComponent;
  */
 public class TachyonCookies extends JavaPlugin {
 
-    public static ComponentKey<CookieComponent> COOKIE_KEY;
+    public static ComponentType<CookieComponent> COOKIE_TYPE;
     private TachyonAPI tachyon;
 
     @Override
@@ -30,7 +30,7 @@ public class TachyonCookies extends JavaPlugin {
 
         var cookieCodec = new CookieComponent.CookieComponentCodec();
 
-        COOKIE_KEY = tachyon.getComponentRegistry().registerKey(CookieComponent.CookieComponentCodec.NAMESPACE, CookieComponent.class, () -> new CookieComponent(1L));
+        COOKIE_TYPE = tachyon.getComponentRegistry().registerType(CookieComponent.CookieComponentCodec.NAMESPACE, CookieComponent.class, () -> new CookieComponent(1L));
         tachyon.getComponentRegistry().registerCodec(cookieCodec);
         tachyon.getComponentRegistry().registerPreviewHandler(CookieComponent.class, cookieCodec);
 

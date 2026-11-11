@@ -4,8 +4,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import tech.skworks.tachyon.api.component.ComponentKey;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
+import tech.skworks.tachyon.api.component.ComponentType;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.spi.TachyonProfileSPI;
 
@@ -70,91 +70,91 @@ public class TachyonProfileImpl implements TachyonProfileSPI {
     // =========================================================================
 
     @Override
-    public <T extends Record> @Nullable T getComponent(@NotNull final ComponentKey<T> key) {
-        final ComponentSlot slot = slots.get(key.slotIndex());
+    public <T extends Record> @Nullable T getComponent(@NotNull final ComponentType<T> type) {
+        final ComponentSlot slot = slots.get(type.slotIndex());
         if (slot == null || slot.isDeleted() || slot.data() == null) {
             return null;
         }
-        return key.cast(slot.data());
+        return type.cast(slot.data());
     }
 
     @Override
-    public <T extends Record> @NotNull T getComponent(@NotNull final ComponentKey<T> key, @NotNull final T defaultValue) {
-        Objects.requireNonNull(key, "key cannot be null");
+    public <T extends Record> @NotNull T getComponent(@NotNull final ComponentType<T> type, @NotNull final T defaultValue) {
+        Objects.requireNonNull(type, "type cannot be null");
         Objects.requireNonNull(defaultValue, "defaultValue cannot be null");
-        final T value = getComponent(key);
+        final T value = getComponent(type);
         return value != null ? value : defaultValue;
     }
 
     @Override
-    public <T extends Record> @NotNull T getComponentOrDefault(@NotNull final ComponentKey<T> key) {
-        Objects.requireNonNull(key, "key cannot be null");
-        final T value = getComponent(key);
+    public <T extends Record> @NotNull T getComponentOrDefault(@NotNull final ComponentType<T> type) {
+        Objects.requireNonNull(type, "type cannot be null");
+        final T value = getComponent(type);
         if (value != null) return value;
-        if (key.defaultSupplier() != null) return key.defaultSupplier().get();
-        throw new IllegalStateException("Component is absent and no default supplier defined for: " + key.namespace());
+        if (type.defaultSupplier() != null) return type.defaultSupplier().get();
+        throw new IllegalStateException("Component is absent and no default supplier defined for: " + type.namespace());
     }
 
     @Override
-    public <T extends Record> void setComponent(@NotNull final ComponentKey<T> key, @NotNull final T component) {
+    public <T extends Record> void setComponent(@NotNull final ComponentType<T> type, @NotNull final T component) {
         Objects.requireNonNull(component, "component cannot be null");
         if (frozen.get()) {
-            LOGGER.warn("Attempted to modify frozen profile {} (Component: {})", uuid, key.namespace());
+            LOGGER.warn("Attempted to modify frozen profile {} (Component: {})", uuid, type.namespace());
             return;
         }
 
-        final int idx = key.slotIndex();
+        final int idx = type.slotIndex();
         slots.updateAndGet(idx, current -> {
             final long nextVer = (current != null) ? current.version() + 1L : 1L;
-            return new ComponentSlot(key, component, nextVer, false);
+            return new ComponentSlot(type, component, nextVer, false);
         });
 
         markDirty(idx);
     }
 
     @Override
-    public <T extends Record> T computeComponent(@NotNull final ComponentKey<T> key,
+    public <T extends Record> T computeComponent(@NotNull final ComponentType<T> type,
                                                  @NotNull final Function<@Nullable T, @NotNull T> remapper) {
         Objects.requireNonNull(remapper, "remapper cannot be null");
         if (frozen.get()) {
-            LOGGER.warn("Attempted to modify frozen profile {} (Component: {})", uuid, key.namespace());
+            LOGGER.warn("Attempted to modify frozen profile {} (Component: {})", uuid, type.namespace());
             return null;
         }
 
-        final int idx = key.slotIndex();
+        final int idx = type.slotIndex();
         final ComponentSlot updated = slots.updateAndGet(idx, current -> {
             final T existing = (current != null && !current.isDeleted() && current.data() != null)
-                    ? key.cast(current.data())
-                    : (key.defaultSupplier() != null ? key.defaultSupplier().get() : null);
+                    ? type.cast(current.data())
+                    : (type.defaultSupplier() != null ? type.defaultSupplier().get() : null);
 
-            final T result = Objects.requireNonNull(remapper.apply(existing), "Remapper returned null for: " + key.namespace());
+            final T result = Objects.requireNonNull(remapper.apply(existing), "Remapper returned null for: " + type.namespace());
             final long nextVer = (current != null) ? current.version() + 1L : 1L;
-            return new ComponentSlot(key, result, nextVer, false);
+            return new ComponentSlot(type, result, nextVer, false);
         });
 
         markDirty(idx);
-        return key.cast(updated.data());
+        return type.cast(updated.data());
     }
 
     @Override
-    public <T extends Record> @NotNull T updateComponent(@NotNull final ComponentKey<T> key,
+    public <T extends Record> @NotNull T updateComponent(@NotNull final ComponentType<T> type,
                                                          @NotNull final java.util.function.UnaryOperator<T> modifier) {
-        Objects.requireNonNull(key, "key cannot be null");
+        Objects.requireNonNull(type, "type cannot be null");
         Objects.requireNonNull(modifier, "modifier cannot be null");
-        return computeComponent(key, current -> modifier.apply(current != null ? current : (key.defaultSupplier() != null ? key.defaultSupplier().get() : null)));
+        return computeComponent(type, current -> modifier.apply(current != null ? current : (type.defaultSupplier() != null ? type.defaultSupplier().get() : null)));
     }
 
     @Override
-    public void removeComponent(@NotNull final ComponentKey<?> key) {
+    public void removeComponent(@NotNull final ComponentType<?> type) {
         if (frozen.get()) {
-            LOGGER.warn("Attempted to modify frozen profile {} (Component: {})", uuid, key.namespace());
+            LOGGER.warn("Attempted to modify frozen profile {} (Component: {})", uuid, type.namespace());
             return;
         }
 
-        final int idx = key.slotIndex();
+        final int idx = type.slotIndex();
         slots.updateAndGet(idx, current -> {
             final long nextVer = (current != null) ? current.version() + 1L : 1L;
-            return ComponentSlot.tombstone(key, nextVer);
+            return ComponentSlot.tombstone(type, nextVer);
         });
 
         markDirty(idx);
@@ -232,7 +232,7 @@ public class TachyonProfileImpl implements TachyonProfileSPI {
         if (snapshot.isEmpty()) return;
 
         for (final ComponentSlot slot : snapshot.slots()) {
-            final int idx = slot.key().slotIndex();
+            final int idx = slot.type().slotIndex();
             final long versionSaved = slot.version();
 
             // Advance confirmed version monotonically (lossless guarantee)
@@ -250,20 +250,20 @@ public class TachyonProfileImpl implements TachyonProfileSPI {
     // DATABASE INITIALIZATION (CALLED DURING PRE-LOGIN)
     // =========================================================================
 
-    public void initComponent(@NotNull final ComponentKey<?> key, @NotNull final Record component, final long version) {
-        final int idx = key.slotIndex();
-        slots.set(idx, ComponentSlot.initial(key, component, version));
+    public void initComponent(@NotNull final ComponentType<?> type, @NotNull final Record component, final long version) {
+        final int idx = type.slotIndex();
+        slots.set(idx, ComponentSlot.initial(type, component, version));
         confirmedVersions.set(idx, version);
     }
 
-    public void initVersion(@NotNull final ComponentKey<?> key, final long version) {
-        confirmedVersions.set(key.slotIndex(), version);
+    public void initVersion(@NotNull final ComponentType<?> type, final long version) {
+        confirmedVersions.set(type.slotIndex(), version);
     }
 
     @Override
-    public long getVersion(@NotNull final ComponentKey<?> key) {
-        final ComponentSlot slot = slots.get(key.slotIndex());
-        return slot != null ? slot.version() : confirmedVersions.get(key.slotIndex());
+    public long getVersion(@NotNull final ComponentType<?> type) {
+        final ComponentSlot slot = slots.get(type.slotIndex());
+        return slot != null ? slot.version() : confirmedVersions.get(type.slotIndex());
     }
 
     @Override

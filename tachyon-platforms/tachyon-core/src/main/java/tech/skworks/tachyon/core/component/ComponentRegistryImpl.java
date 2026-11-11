@@ -16,7 +16,7 @@ import java.util.function.Supplier;
 
 /**
  * The central component registry managing dense slot index allocations,
- * ComponentKey tokens, serialization codecs, and visual preview handlers.
+ * ComponentType tokens, serialization codecs, and visual preview handlers.
  *
  * <p><i>Project Tachyon</i></p>
  *
@@ -34,8 +34,8 @@ public class ComponentRegistryImpl implements ComponentRegistry {
     private final Map<Class<? extends Record>, ComponentPreviewHandler<?, ? extends Record>> previewHandlers = new ConcurrentHashMap<>();
 
     // Dense slot indexation lookup structures
-    private final Map<ComponentNamespace, ComponentKey<?>> keysByNamespace = new ConcurrentHashMap<>();
-    private final Map<Integer, ComponentKey<?>> keysBySlot = new ConcurrentHashMap<>();
+    private final Map<ComponentNamespace, ComponentType<?>> typesByNamespace = new ConcurrentHashMap<>();
+    private final Map<Integer, ComponentType<?>> typesBySlot = new ConcurrentHashMap<>();
     private final AtomicInteger slotCounter = new AtomicInteger(0);
 
     @Override
@@ -45,8 +45,8 @@ public class ComponentRegistryImpl implements ComponentRegistry {
         codecsByNamespace.put(codec.getComponentNamespace(), codec);
         codecsByComponent.put(codec.getComponentClass(), codec);
 
-        // Pre-allocate or link ComponentKey
-        getOrCreateKey(codec.getComponentNamespace(), codec.getComponentClass(), null);
+        // Pre-allocate or link ComponentType
+        getOrCreateType(codec.getComponentNamespace(), codec.getComponentClass(), null);
         LOGGER.info("Registered component codec: {}", codec.getComponentNamespace());
     }
 
@@ -60,51 +60,51 @@ public class ComponentRegistryImpl implements ComponentRegistry {
     }
 
     @Override
-    public <T extends Record> ComponentKey<T> registerKey(@NotNull final ComponentNamespace namespace,
-                                                          @NotNull final Class<T> type) {
-        return registerKey(namespace, type, null);
+    public <T extends Record> ComponentType<T> registerType(@NotNull final ComponentNamespace namespace,
+                                                            @NotNull final Class<T> recordClass) {
+        return registerType(namespace, recordClass, null);
     }
 
     @Override
     @SuppressWarnings("unchecked")
-    public <T extends Record> ComponentKey<T> registerKey(@NotNull final ComponentNamespace namespace,
-                                                          @NotNull final Class<T> type,
-                                                          @Nullable final Supplier<T> defaultSupplier) {
+    public <T extends Record> ComponentType<T> registerType(@NotNull final ComponentNamespace namespace,
+                                                            @NotNull final Class<T> recordClass,
+                                                            @Nullable final Supplier<T> defaultSupplier) {
         Objects.requireNonNull(namespace, "namespace cannot be null");
-        Objects.requireNonNull(type, "type cannot be null");
+        Objects.requireNonNull(recordClass, "recordClass cannot be null");
 
-        return (ComponentKey<T>) keysByNamespace.computeIfAbsent(namespace, ns -> {
+        return (ComponentType<T>) typesByNamespace.computeIfAbsent(namespace, ns -> {
             final int slot = slotCounter.getAndIncrement();
             if (slot >= MAX_SLOTS) {
                 throw new IllegalStateException("Maximum component capacity (" + MAX_SLOTS + ") exceeded! Cannot register: " + ns);
             }
-            final ComponentKey<T> key = new ComponentKey<>(slot, ns, type, defaultSupplier);
-            keysBySlot.put(slot, key);
-            LOGGER.info("Allocated dense slot {} for component key: {}", slot, ns);
-            return key;
+            final ComponentType<T> type = new ComponentType<>(slot, ns, recordClass, defaultSupplier);
+            typesBySlot.put(slot, type);
+            LOGGER.info("Allocated dense slot {} for component type: {}", slot, ns);
+            return type;
         });
     }
 
     @Override
     @SuppressWarnings("unchecked")
-    public <T extends Record> ComponentKey<T> getOrCreateKey(@NotNull final ComponentNamespace namespace,
-                                                             @NotNull final Class<T> type,
-                                                             @Nullable final Supplier<T> defaultSupplier) {
-        final ComponentKey<?> existing = keysByNamespace.get(namespace);
+    public <T extends Record> ComponentType<T> getOrCreateType(@NotNull final ComponentNamespace namespace,
+                                                               @NotNull final Class<T> recordClass,
+                                                               @Nullable final Supplier<T> defaultSupplier) {
+        final ComponentType<?> existing = typesByNamespace.get(namespace);
         if (existing != null) {
-            return (ComponentKey<T>) existing;
+            return (ComponentType<T>) existing;
         }
-        return registerKey(namespace, type, defaultSupplier);
+        return registerType(namespace, recordClass, defaultSupplier);
     }
 
     @Override
-    public @Nullable ComponentKey<?> getKey(@NotNull final ComponentNamespace namespace) {
-        return keysByNamespace.get(namespace);
+    public @Nullable ComponentType<?> getType(@NotNull final ComponentNamespace namespace) {
+        return typesByNamespace.get(namespace);
     }
 
     @Override
-    public @Nullable ComponentKey<?> getKey(final int slotIndex) {
-        return keysBySlot.get(slotIndex);
+    public @Nullable ComponentType<?> getType(final int slotIndex) {
+        return typesBySlot.get(slotIndex);
     }
 
     @Override

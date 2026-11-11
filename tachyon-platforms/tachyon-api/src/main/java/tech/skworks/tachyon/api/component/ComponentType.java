@@ -7,17 +7,17 @@ import java.util.Objects;
 import java.util.function.Supplier;
 
 /**
- * Strongly-typed, immutable token representing a persistent player data component.
+ * Strongly-typed, immutable token representing a persistent player data component type.
  * <p>
- * Acts purely as a descriptor token holding dense slot index, canonical namespace,
- * component Record class type, and an optional fallback supplier. Follows Single Responsibility Principle (SRP).
+ * Combines zero-indirection integer slot indexing in RAM with generic compile-time safety.
+ * Follows the Single Responsibility Principle (SRP) as a pure data descriptor.
  * </p>
  *
  * <p><i>Project Tachyon</i></p>
  *
- * @param slotIndex       The dense, contiguous integer index (0 <= slotIndex < 128) allocated by ComponentRegistry.
- * @param namespace       The canonical namespace of the component.
- * @param type            The Java 25 Record class representing the component state.
+ * @param slotIndex       The dense integer slot index (0 <= slotIndex < 128) allocated by ComponentRegistry.
+ * @param namespace       The canonical persistent storage namespace of this component.
+ * @param type            The Java 25 Record class representing this component state.
  * @param defaultSupplier Optional supplier evaluated lazily when the component is absent.
  * @param <T>             The component record type.
  *
@@ -25,13 +25,13 @@ import java.util.function.Supplier;
  * @version 2.0
  * @since 2.0.0-SNAPSHOT
  */
-public record ComponentKey<T extends Record>(
+public record ComponentType<T extends Record>(
         int slotIndex,
         @NotNull ComponentNamespace namespace,
         @NotNull Class<T> type,
         @Nullable Supplier<T> defaultSupplier
 ) {
-    public ComponentKey {
+    public ComponentType {
         Objects.requireNonNull(namespace, "namespace cannot be null");
         Objects.requireNonNull(type, "type cannot be null");
         if (slotIndex < 0 || slotIndex >= 128) {
@@ -40,7 +40,7 @@ public record ComponentKey<T extends Record>(
     }
 
     /**
-     * Safely casts an arbitrary record instance to this key's type.
+     * Safely casts an arbitrary record instance to this component type.
      *
      * @param instance The object to cast.
      * @return The typed component instance.

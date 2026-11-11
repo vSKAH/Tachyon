@@ -9,7 +9,7 @@ import java.util.function.Supplier;
 /**
  * The central hub for managing and resolving all Protobuf and Record components within Tachyon.
  * <p>
- * Manages dense slot allocations, typed {@link ComponentKey} tokens, codecs, and GUI previews.
+ * Manages dense slot allocations, typed {@link ComponentType} tokens, codecs, and GUI previews.
  * Pure interface contract (no default implementation code).
  * </p>
  *
@@ -27,52 +27,52 @@ public interface ComponentRegistry {
     int MAX_SUPPORTED_COMPONENTS = 128;
 
     /**
-     * Registers a new typed component key with an optional default supplier.
+     * Registers a new typed component type with an optional default supplier.
      *
      * @param namespace       The canonical namespace of the component.
-     * @param type            The component record class.
+     * @param recordClass     The component record class.
      * @param defaultSupplier Optional default supplier.
      * @param <T>             The component record type.
-     * @return The registered ComponentKey with an assigned dense slotIndex.
+     * @return The registered ComponentType with an assigned dense slotIndex.
      */
-    <T extends Record> ComponentKey<T> registerKey(@NotNull ComponentNamespace namespace, @NotNull Class<T> type, @Nullable Supplier<T> defaultSupplier);
+    <T extends Record> ComponentType<T> registerType(@NotNull ComponentNamespace namespace, @NotNull Class<T> recordClass, @Nullable Supplier<T> defaultSupplier);
 
     /**
-     * Registers a new typed component key without a default supplier.
+     * Registers a new typed component type without a default supplier.
      *
-     * @param namespace The canonical namespace of the component.
-     * @param type      The component record class.
-     * @param <T>       The component record type.
-     * @return The registered ComponentKey with an assigned dense slotIndex.
+     * @param namespace   The canonical namespace of the component.
+     * @param recordClass The component record class.
+     * @param <T>         The component record type.
+     * @return The registered ComponentType with an assigned dense slotIndex.
      */
-    <T extends Record> ComponentKey<T> registerKey(@NotNull ComponentNamespace namespace, @NotNull Class<T> type);
+    <T extends Record> ComponentType<T> registerType(@NotNull ComponentNamespace namespace, @NotNull Class<T> recordClass);
 
     /**
-     * Retrieves an existing ComponentKey by its namespace, or null if not registered.
+     * Retrieves an existing ComponentType by its namespace, or null if not registered.
      *
      * @param namespace The canonical namespace.
-     * @return The ComponentKey or null.
+     * @return The ComponentType or null.
      */
-    @Nullable ComponentKey<?> getKey(@NotNull ComponentNamespace namespace);
+    @Nullable ComponentType<?> getType(@NotNull ComponentNamespace namespace);
 
     /**
-     * Retrieves an existing ComponentKey by its allocated dense slotIndex, or null.
+     * Retrieves an existing ComponentType by its allocated dense slotIndex, or null.
      *
      * @param slotIndex The dense slot index (0 <= slotIndex < 128).
-     * @return The ComponentKey or null.
+     * @return The ComponentType or null.
      */
-    @Nullable ComponentKey<?> getKey(int slotIndex);
+    @Nullable ComponentType<?> getType(int slotIndex);
 
     /**
-     * Retrieves an existing ComponentKey or registers a new one atomically.
+     * Retrieves an existing ComponentType or registers a new one atomically.
      *
      * @param namespace       The canonical namespace of the component.
-     * @param type            The component record class.
+     * @param recordClass     The component record class.
      * @param defaultSupplier Optional default supplier.
      * @param <T>             The component record type.
-     * @return The existing or newly registered ComponentKey.
+     * @return The existing or newly registered ComponentType.
      */
-    <T extends Record> ComponentKey<T> getOrCreateKey(@NotNull ComponentNamespace namespace, @NotNull Class<T> type, @Nullable Supplier<T> defaultSupplier);
+    <T extends Record> ComponentType<T> getOrCreateType(@NotNull ComponentNamespace namespace, @NotNull Class<T> recordClass, @Nullable Supplier<T> defaultSupplier);
 
     /**
      * Registers a new ComponentCodec.

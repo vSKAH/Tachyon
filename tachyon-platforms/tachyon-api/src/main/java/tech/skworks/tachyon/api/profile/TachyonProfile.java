@@ -2,7 +2,7 @@ package tech.skworks.tachyon.api.profile;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import tech.skworks.tachyon.api.component.ComponentKey;
+import tech.skworks.tachyon.api.component.ComponentType;
 
 import java.util.UUID;
 import java.util.function.Function;
@@ -32,79 +32,79 @@ public interface TachyonProfile {
     @NotNull UUID getUuid();
 
     // =========================================================================
-    // PRIMARY HOT-PATH API: O(1) PURE, LOCK-FREE VIA COMPONENTKEY<T>
+    // PRIMARY HOT-PATH API: O(1) PURE, LOCK-FREE VIA COMPONENTTYPE<T>
     // =========================================================================
 
     /**
-     * Retrieves a component using its typed ComponentKey in O(1) time (~2.8ns).
+     * Retrieves a component using its typed ComponentType in O(1) time (~2.8ns).
      *
-     * @param key The typed component key.
-     * @param <T> The record component type.
+     * @param type The typed component type token.
+     * @param <T>  The record component type.
      * @return The current component instance, or null if absent or deleted.
      */
-    <T extends Record> @Nullable T getComponent(@NotNull ComponentKey<T> key);
+    <T extends Record> @Nullable T getComponent(@NotNull ComponentType<T> type);
 
     /**
-     * Retrieves a component using its typed ComponentKey, returning a fallback value if absent.
+     * Retrieves a component using its typed ComponentType, returning a fallback value if absent.
      *
-     * @param key          The typed component key.
+     * @param type         The typed component type token.
      * @param defaultValue Fallback value if absent.
      * @param <T>          The record component type.
      * @return The component or defaultValue.
      */
-    <T extends Record> @NotNull T getComponent(@NotNull ComponentKey<T> key, @NotNull T defaultValue);
+    <T extends Record> @NotNull T getComponent(@NotNull ComponentType<T> type, @NotNull T defaultValue);
 
     /**
-     * Retrieves a component using its typed ComponentKey, falling back to defaultSupplier if defined.
+     * Retrieves a component using its typed ComponentType, falling back to defaultSupplier if defined.
      *
-     * @param key The typed component key.
-     * @param <T> The record component type.
+     * @param type The typed component type token.
+     * @param <T>  The record component type.
      * @return The component instance.
-     * @throws IllegalStateException If component is absent and key has no defaultSupplier.
+     * @throws IllegalStateException If component is absent and type has no defaultSupplier.
      */
-    <T extends Record> @NotNull T getComponentOrDefault(@NotNull ComponentKey<T> key);
+    <T extends Record> @NotNull T getComponentOrDefault(@NotNull ComponentType<T> type);
 
     /**
-     * Stores or overwrites a component using its typed ComponentKey.
+     * Stores or overwrites a component using its typed ComponentType.
      *
-     * @param key       The typed component key.
+     * @param type      The typed component type token.
      * @param component The new component record instance.
      * @param <T>       The record component type.
      */
-    <T extends Record> void setComponent(@NotNull ComponentKey<T> key, @NotNull T component);
+    <T extends Record> void setComponent(@NotNull ComponentType<T> type, @NotNull T component);
 
     /**
-     * Atomically computes a new component value using its typed ComponentKey.
+     * Atomically computes a new component value using its typed ComponentType.
      *
-     * @param key      The typed component key.
+     * @param type     The typed component type token.
      * @param remapper Function taking existing component (or null) and returning new non-null component.
      * @param <T>      The record component type.
      * @return The updated component record instance.
      */
-    <T extends Record> T computeComponent(@NotNull ComponentKey<T> key, @NotNull Function<@Nullable T, @NotNull T> remapper);
+    <T extends Record> T computeComponent(@NotNull ComponentType<T> type, @NotNull Function<@Nullable T, @NotNull T> remapper);
 
     /**
-     * Atomically mutates a component using its typed ComponentKey and modifier function.
+     * Atomically mutates a component using its typed ComponentType and modifier function.
      *
-     * @param key      The typed component key.
+     * @param type     The typed component type token.
      * @param modifier Transformation function applied to current or default state.
      * @param <T>      The record component type.
      * @return The updated component record instance.
      */
-    <T extends Record> @NotNull T updateComponent(@NotNull ComponentKey<T> key, @NotNull UnaryOperator<T> modifier);
+    <T extends Record> @NotNull T updateComponent(@NotNull ComponentType<T> type, @NotNull UnaryOperator<T> modifier);
 
     /**
      * Removes a component by marking its slot as a tombstone.
      *
-     * @param key The typed component key to remove.
+     * @param type The typed component type token to remove.
      */
-    void removeComponent(@NotNull ComponentKey<?> key);
+    void removeComponent(@NotNull ComponentType<?> type);
 
     /**
-     * Retrieves the monotonically increasing version counter for a component key in O(1).
+     * Retrieves the monotonically increasing version counter for a component type in O(1).
      *
-     * @param key The component key.
+     * @param type The component type token.
      * @return The current version revision number.
      */
-    long getVersion(@NotNull ComponentKey<?> key);
+    long getVersion(@NotNull ComponentType<?> type);
 }
