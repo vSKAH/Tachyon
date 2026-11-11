@@ -12,7 +12,7 @@ import java.util.function.UnaryOperator;
  * Public player data container contract for plugins and external modules.
  * <p>
  * Exposes strictly user-facing component operations. Engine lifecycle, dirty tracking,
- * and persistence internals are isolated in {@link tech.skworks.tachyon.api.profile.spi.TachyonProfileSPI}.
+ * and persistence internals are encapsulated in the engine implementation.
  * Pure interface contract (zero default code).
  * </p>
  *

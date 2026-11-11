@@ -7,7 +7,6 @@ import org.slf4j.LoggerFactory;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.api.component.ComponentType;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
-import tech.skworks.tachyon.api.profile.spi.TachyonProfileSPI;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,7 +29,7 @@ import java.util.function.Function;
  * @version 2.0
  * @since 1.0.0-SNAPSHOT
  */
-public class TachyonProfileImpl implements TachyonProfileSPI {
+public class TachyonProfileImpl implements TachyonProfile {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("Tachyon/Profile");
     public static final int MAX_SLOTS = 128;
@@ -55,7 +54,6 @@ public class TachyonProfileImpl implements TachyonProfileSPI {
         this.registry = Objects.requireNonNull(registry, "registry cannot be null");
     }
 
-    @Override
     public @NotNull ComponentRegistry getRegistry() {
         return this.registry;
     }
@@ -164,7 +162,6 @@ public class TachyonProfileImpl implements TachyonProfileSPI {
     // DIRTY TRACKING & SNAPSHOTTING ENGINE
     // =========================================================================
 
-    @Override
     public boolean hasPendingChanges() {
         return (dirtyBitmaskLow.get() | dirtyBitmaskHigh.get()) != 0L;
     }
@@ -266,12 +263,10 @@ public class TachyonProfileImpl implements TachyonProfileSPI {
         return slot != null ? slot.version() : confirmedVersions.get(type.slotIndex());
     }
 
-    @Override
     public void freeze() {
         this.frozen.set(true);
     }
 
-    @Override
     public boolean isFrozen() {
         return this.frozen.get();
     }

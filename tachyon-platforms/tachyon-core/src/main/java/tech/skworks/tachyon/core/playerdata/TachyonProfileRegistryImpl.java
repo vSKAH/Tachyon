@@ -12,7 +12,6 @@ import tech.skworks.tachyon.api.event.profile.ProfileLoadedEvent;
 import tech.skworks.tachyon.api.event.profile.ProfileUnloadedEvent;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
-import tech.skworks.tachyon.api.profile.spi.TachyonProfileSPI;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
 import tech.skworks.tachyon.core.metric.scraper.TachyonCollector;
 
@@ -137,8 +136,8 @@ public class TachyonProfileRegistryImpl<PLUGIN> implements TachyonProfileRegistr
     public void unloadProfile(@NotNull final UUID uuid, @NotNull final String reason) {
         TachyonProfile profile = remove(uuid);
         if (profile == null) return;
-        if (profile instanceof TachyonProfileSPI spi) {
-            spi.freeze();
+        if (profile instanceof TachyonProfileImpl impl) {
+            impl.freeze();
         }
         LOGGER.info("Profile unloaded and frozen for {}. Active profiles: {}", uuid, profiles.size());
         if (tachyonCollector != null) tachyonCollector.updateProfilesCount(profiles.size());

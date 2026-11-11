@@ -13,7 +13,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
-import tech.skworks.tachyon.api.profile.spi.TachyonProfileSPI;
 import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
 import tech.skworks.tachyon.common.player.PlayerDelta;
@@ -157,7 +156,7 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
         Objects.requireNonNull(tachyonProfile, "tachyonProfile cannot be null");
         final var uuid = tachyonProfile.getUuid();
 
-        if (tachyonProfile instanceof TachyonProfileSPI spi && !spi.hasPendingChanges()) {
+        if (tachyonProfile instanceof TachyonProfileImpl impl && !impl.hasPendingChanges()) {
             CompletableFuture<Void> existing = inFlightSaves.get(uuid);
             return existing != null ? existing : CompletableFuture.completedFuture(null);
         }

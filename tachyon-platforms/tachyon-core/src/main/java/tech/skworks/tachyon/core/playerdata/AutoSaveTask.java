@@ -6,7 +6,6 @@ import org.slf4j.LoggerFactory;
 import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
-import tech.skworks.tachyon.api.profile.spi.TachyonProfileSPI;
 import tech.skworks.tachyon.api.system.HealthService;
 
 import java.util.ArrayList;
@@ -61,7 +60,7 @@ public class AutoSaveTask implements Runnable {
 
 
             final var dirtyProfiles = tachyonProfileRegistry.getProfiles().stream()
-                    .filter(p -> p instanceof TachyonProfileSPI spi && spi.hasPendingChanges())
+                    .filter(p -> p instanceof TachyonProfileImpl impl && impl.hasPendingChanges())
                     .toList();
 
             if (dirtyProfiles.isEmpty()) {
