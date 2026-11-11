@@ -10,37 +10,12 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
-// =============================================================================
-// PAD-FIELD INHERITANCE: 128-BYTE CACHELINE ISOLATION (ZERO FALSE SHARING)
-// =============================================================================
-
-abstract class ConcurrentRingBufferPad0 {
-    long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e, p0f;
-}
-
-abstract class ConcurrentRingBufferProducerFields extends ConcurrentRingBufferPad0 {
-    volatile long producerIndex;
-}
-
-abstract class ConcurrentRingBufferPad1 extends ConcurrentRingBufferProducerFields {
-    long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e, p1f;
-}
-
-abstract class ConcurrentRingBufferConsumerFields extends ConcurrentRingBufferPad1 {
-    volatile long consumerIndex;
-}
-
-abstract class ConcurrentRingBufferPad2 extends ConcurrentRingBufferConsumerFields {
-    long p20, p21, p22, p23, p24, p25, p26, p27, p28, p29, p2a, p2b, p2c, p2d, p2e, p2f;
-}
-
 /**
  * High-performance, 100% Lock-Free Multi-Producer Single-Consumer (MPSC) Bounded Ring Buffer.
  * <p>
  * Specifically engineered for Paper and Folia 26.3 running on Java 25:
  * <ul>
  *   <li><b>Zero Locks:</b> Eradicates all {@code ReentrantLock} contention; no Folia RegionThread will ever park.</li>
- *   <li><b>Cacheline Isolation:</b> 128-byte pad-field class inheritance prevents False Sharing across L1/L2 caches.</li>
  *   <li><b>Zero-Allocation:</b> {@link #drainTo(Consumer, int)} streams directly to consumers without intermediate objects.</li>
  *   <li><b>Lossy Bounded:</b> Drops elements cleanly when full without corrupting the consumer cursor, tracking dropped counts.</li>
  * </ul>
@@ -54,7 +29,7 @@ abstract class ConcurrentRingBufferPad2 extends ConcurrentRingBufferConsumerFiel
  * @version 2.0
  * @since 2.0.0-alpha.2
  */
-public final class ConcurrentRingBuffer<T> extends ConcurrentRingBufferPad2 {
+public final class ConcurrentRingBuffer<T> {
 
     private static final VarHandle PRODUCER_INDEX;
     private static final VarHandle CONSUMER_INDEX;
@@ -63,13 +38,15 @@ public final class ConcurrentRingBuffer<T> extends ConcurrentRingBufferPad2 {
     static {
         try {
             final MethodHandles.Lookup lookup = MethodHandles.lookup();
-            PRODUCER_INDEX = lookup.findVarHandle(ConcurrentRingBufferProducerFields.class, "producerIndex", long.class);
-            CONSUMER_INDEX = lookup.findVarHandle(ConcurrentRingBufferConsumerFields.class, "consumerIndex", long.class);
+            PRODUCER_INDEX = lookup.findVarHandle(ConcurrentRingBuffer.class, "producerIndex", long.class);
+            CONSUMER_INDEX = lookup.findVarHandle(ConcurrentRingBuffer.class, "consumerIndex", long.class);
         } catch (ReflectiveOperationException e) {
             throw new ExceptionInInitializerError(e);
         }
     }
 
+    private volatile long producerIndex;
+    private volatile long consumerIndex;
     private final Object[] elements;
     private final int mask;
     private final int capacity;
