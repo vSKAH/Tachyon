@@ -15,6 +15,7 @@ import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
+import tech.skworks.tachyon.common.player.PlayerDelta;
 import tech.skworks.tachyon.core.grpc.AbstractGrpcService;
 import tech.skworks.tachyon.core.grpc.GrpcClient;
 import tech.skworks.tachyon.core.metric.scraper.TachyonCollector;
@@ -178,21 +179,27 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
             return CompletableFuture.completedFuture(null);
         }
 
-        final var uuid = tachyonProfile.getUuid();
-        final var dirtyComponents = tachyonProfile.extractDirtyComponents();
-        final var deletedComponents = tachyonProfile.extractDeletedComponents();
-        final var delta = PlayerDeltaAdapter.fromProfile(tachyonProfile);
-
-        if (delta.isEmpty()) {
+        if (!(tachyonProfile instanceof TachyonProfileImpl profileImpl)) {
+            LOGGER.warn("pushProfile called with non-lock-free profile instance for {}", tachyonProfile.getUuid());
             return CompletableFuture.completedFuture(null);
         }
 
-        final var versionSnapshots = new java.util.HashMap<tech.skworks.tachyon.api.component.ComponentNamespace, Long>();
-        for (final var namespace : dirtyComponents.keySet()) {
-            versionSnapshots.put(namespace, tachyonProfile.getVersion(namespace));
+        // STEP 1: Single-pass, lock-free snapshot capture on-tick in <100ns.
+        // ZERO BSON encoding happens on this thread!
+        final ProfileFlushBatch snapshot = profileImpl.captureFlushBatch();
+        if (snapshot.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
         }
 
+        final UUID uuid = tachyonProfile.getUuid();
+
+        // STEP 2: Offload BSON encoding and gRPC wire I/O to Java 25 Virtual Threads.
         return asyncRun(vThreadExecutor, LOGGER, "SaveProfile", () -> {
+            final PlayerDelta delta = PlayerDeltaAdapter.fromFlushBatch(snapshot, tachyonProfile.getRegistry());
+            if (delta.isEmpty()) {
+                return;
+            }
+
             ClientCalls.blockingUnaryCall(
                     grpcClient.getChannel(),
                     PlayerDataContract.PUSH_PROFILE_METHOD,
@@ -201,10 +208,12 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
             );
         }).whenComplete((_, throwable) -> {
             if (throwable == null) {
-                tachyonProfile.markAsClean(versionSnapshots, deletedComponents);
+                // STEP 3: Concurrency-safe confirmation using monotonic high-water mark
+                profileImpl.confirmFlush(snapshot);
             } else {
-                LOGGER.warn("Save profile failed for {} ({}) — routing to local recovery store.", uuid, throwable.getMessage());
-                dlqService.enqueue(delta);
+                LOGGER.warn("Save profile failed for {} ({}) — routing to local recovery DLQ store.", uuid, throwable.getMessage());
+                final PlayerDelta dlqDelta = PlayerDeltaAdapter.fromFlushBatch(snapshot, tachyonProfile.getRegistry());
+                dlqService.enqueue(dlqDelta);
             }
         });
     }

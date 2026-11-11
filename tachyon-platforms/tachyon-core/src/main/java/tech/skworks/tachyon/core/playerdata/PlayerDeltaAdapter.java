@@ -1,36 +1,80 @@
 package tech.skworks.tachyon.core.playerdata;
 
+import org.bson.BsonDocument;
 import org.jetbrains.annotations.NotNull;
+import tech.skworks.tachyon.api.component.ComponentCodec;
+import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.common.player.PlayerDelta;
 
 import java.util.Objects;
 
 /**
- * Short class explaination
+ * Adapter converting lock-free ProfileFlushBatch instances into PlayerDelta wire models.
  * <p>
- * Long class explaination with @link if needed
+ * Ensures BSON encoding is decoupled from the game loop and executed inside Virtual Threads.
  * </p>
  *
  * <p><i>Project Tachyon</i></p>
  *
  * @author Jimmy (vSKAH) - 21/09/2026
- * @version 1.0
+ * @version 2.0
  * @since 2.0.0-alpha.2
  */
 public final class PlayerDeltaAdapter {
 
     private PlayerDeltaAdapter() {}
 
-    public static @NotNull PlayerDelta fromProfile(@NotNull final TachyonProfile profile) throws NullPointerException{
-        Objects.requireNonNull(profile, "profile cannot be null");
-        final var delta = new PlayerDelta(profile.getUuid());
+    /**
+     * Constructs a PlayerDelta from an immutable ProfileFlushBatch using registered codecs.
+     * <p>
+     * Executed strictly off-tick within Java 25 Virtual Threads.
+     * </p>
+     *
+     * @param snapshot The immutable profile snapshot.
+     * @param registry The component registry holding codecs.
+     * @return The populated, ready-to-serialize PlayerDelta.
+     */
+    public static @NotNull PlayerDelta fromFlushBatch(@NotNull final ProfileFlushBatch snapshot,
+                                                    @NotNull final ComponentRegistry registry) {
+        Objects.requireNonNull(snapshot, "snapshot cannot be null");
+        Objects.requireNonNull(registry, "registry cannot be null");
 
-        profile.extractDirtyComponents().forEach((namespace, document) ->
-                delta.addSave(namespace.fullNamespace(), document, profile.getVersion(namespace)));
-        profile.extractDeletedComponents().forEach(namespace ->
-                delta.addRemove(namespace.fullNamespace(), profile.getVersion(namespace)));
+        final var delta = new PlayerDelta(snapshot.uuid());
+
+        for (final ComponentSlot slot : snapshot.slots()) {
+            final var namespace = slot.namespace();
+            final long version = slot.version();
+
+            if (slot.isDeleted() || slot.data() == null) {
+                delta.addRemove(namespace.fullNamespace(), version);
+            } else {
+                final ComponentCodec<?> codec = registry.getCodec(namespace);
+                if (codec != null) {
+                    final BsonDocument doc = encodeUnchecked(codec, slot.data());
+                    delta.addSave(namespace.fullNamespace(), doc, version);
+                }
+            }
+        }
 
         return delta;
+    }
+
+    /**
+     * @deprecated Use {@link #fromFlushBatch(ProfileFlushBatch, ComponentRegistry)}.
+     */
+    @Deprecated(since = "2.0.0", forRemoval = false)
+    public static @NotNull PlayerDelta fromProfile(@NotNull final TachyonProfile profile) {
+        Objects.requireNonNull(profile, "profile cannot be null");
+        if (profile instanceof TachyonProfileImpl profileImpl) {
+            final ProfileFlushBatch snapshot = profileImpl.captureFlushBatch();
+            return fromFlushBatch(snapshot, profile.getRegistry());
+        }
+        return new PlayerDelta(profile.getUuid());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <R extends Record> BsonDocument encodeUnchecked(final ComponentCodec<R> codec, final Record data) {
+        return codec.encode((R) data);
     }
 }
