@@ -1,4 +1,4 @@
-package tech.skworks.tachyon.core.playerdata;
+package tech.skworks.tachyon.core.profile;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.api.component.ComponentType;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
+import tech.skworks.tachyon.core.profile.persistence.ProfileFlushBatch;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;

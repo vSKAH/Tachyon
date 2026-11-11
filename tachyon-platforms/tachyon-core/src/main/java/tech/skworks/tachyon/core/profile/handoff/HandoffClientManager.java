@@ -1,4 +1,4 @@
-package tech.skworks.tachyon.core.playerdata.handoff;
+package tech.skworks.tachyon.core.profile.handoff;
 
 import io.grpc.CallOptions;
 import io.grpc.stub.ClientCalls;
@@ -18,8 +18,8 @@ import tech.skworks.tachyon.common.contract.HandoffContract;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
 import tech.skworks.tachyon.common.player.PlayerDelta;
 import tech.skworks.tachyon.core.grpc.GrpcClient;
-import tech.skworks.tachyon.core.playerdata.PlayerDeltaAdapter;
-import tech.skworks.tachyon.core.playerdata.TachyonProfileImpl;
+import tech.skworks.tachyon.core.profile.TachyonProfileImpl;
+import tech.skworks.tachyon.core.profile.persistence.PlayerDeltaAdapter;
 
 import java.util.Objects;
 import java.util.UUID;

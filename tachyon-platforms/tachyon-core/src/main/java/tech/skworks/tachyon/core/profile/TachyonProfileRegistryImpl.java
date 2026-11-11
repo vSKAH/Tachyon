@@ -1,4 +1,4 @@
-package tech.skworks.tachyon.core.playerdata;
+package tech.skworks.tachyon.core.profile;
 
 import org.bson.BsonDocument;
 import org.jetbrains.annotations.NotNull;

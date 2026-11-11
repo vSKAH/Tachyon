@@ -1,10 +1,11 @@
-package tech.skworks.tachyon.core.playerdata;
+package tech.skworks.tachyon.core.profile.persistence;
 
 import org.bson.BsonDocument;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.component.ComponentCodec;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.common.player.PlayerDelta;
+import tech.skworks.tachyon.core.profile.ComponentSlot;
 
 import java.util.Objects;
 

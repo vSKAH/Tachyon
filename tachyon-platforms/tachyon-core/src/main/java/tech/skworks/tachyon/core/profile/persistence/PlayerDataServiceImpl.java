@@ -1,4 +1,4 @@
-package tech.skworks.tachyon.core.playerdata;
+package tech.skworks.tachyon.core.profile.persistence;
 
 import io.grpc.CallOptions;
 import io.grpc.Status;
@@ -19,6 +19,7 @@ import tech.skworks.tachyon.common.player.PlayerDelta;
 import tech.skworks.tachyon.core.grpc.AbstractGrpcService;
 import tech.skworks.tachyon.core.grpc.GrpcClient;
 import tech.skworks.tachyon.core.metric.scraper.TachyonCollector;
+import tech.skworks.tachyon.core.profile.TachyonProfileImpl;
 import tech.skworks.tachyon.core.resilience.ResilienceService;
 
 import java.util.Map;

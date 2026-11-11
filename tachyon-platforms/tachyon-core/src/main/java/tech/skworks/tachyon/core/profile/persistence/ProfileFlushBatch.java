@@ -1,6 +1,7 @@
-package tech.skworks.tachyon.core.playerdata;
+package tech.skworks.tachyon.core.profile.persistence;
 
 import org.jetbrains.annotations.NotNull;
+import tech.skworks.tachyon.core.profile.ComponentSlot;
 
 import java.util.List;
 import java.util.Objects;

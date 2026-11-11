@@ -6,7 +6,7 @@ import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.core.audit.AuditConfig;
 import tech.skworks.tachyon.core.grpc.GrpcClientConfig;
 import tech.skworks.tachyon.core.metric.MetricsConfig;
-import tech.skworks.tachyon.core.playerdata.PlayerDataConfig;
+import tech.skworks.tachyon.core.profile.persistence.PlayerDataConfig;
 import tech.skworks.tachyon.core.playersession.PlayerSessionConfig;
 
 import java.time.Duration;

@@ -1,4 +1,4 @@
-package tech.skworks.tachyon.core.playerdata;
+package tech.skworks.tachyon.core.profile;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;

@@ -1,4 +1,4 @@
-package tech.skworks.tachyon.core.playerdata;
+package tech.skworks.tachyon.core.profile;
 
 import org.bson.BsonDocument;
 import org.bson.BsonInt64;
@@ -10,6 +10,8 @@ import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.component.ComponentType;
 import tech.skworks.tachyon.common.player.PlayerDelta;
 import tech.skworks.tachyon.core.component.ComponentRegistryImpl;
+import tech.skworks.tachyon.core.profile.persistence.PlayerDeltaAdapter;
+import tech.skworks.tachyon.core.profile.persistence.ProfileFlushBatch;
 
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;

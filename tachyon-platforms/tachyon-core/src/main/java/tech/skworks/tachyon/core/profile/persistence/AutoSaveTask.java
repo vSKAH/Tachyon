@@ -1,4 +1,4 @@
-package tech.skworks.tachyon.core.playerdata;
+package tech.skworks.tachyon.core.profile.persistence;
 
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -7,6 +7,7 @@ import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
 import tech.skworks.tachyon.api.system.HealthService;
+import tech.skworks.tachyon.core.profile.TachyonProfileImpl;
 
 import java.util.ArrayList;
 import java.util.Objects;
