@@ -54,6 +54,11 @@ public class AutoSaveTask implements Runnable {
 
         try {
 
+            if (healthService.isHealthy() && !playerDataDlqService.isRunning()) {
+                playerDataDlqService.replayAll();
+            }
+
+
             final var dirtyProfiles = tachyonProfileRegistry.getProfiles().stream().filter(TachyonProfile::hasPendingChanges).toList();
 
             if (dirtyProfiles.isEmpty()) {

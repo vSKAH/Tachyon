@@ -242,6 +242,10 @@ public class PlayerDataDlqService {
         }
     }
 
+    public boolean isRunning() {
+        return running.get();
+    }
+
     private record ReplayEntry(@NotNull PlayerDelta delta, long lastModifiedTimestamp, @NotNull Path file) {
     }
 }

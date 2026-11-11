@@ -21,6 +21,10 @@ tachyon:
     throttle-seconds: 300
   warmup:
     duration: 30
+  grpc:
+    auth:
+      enabled: true
+      token: "CHANGE-ME-PLEASE"
 
 quarkus:
   http:

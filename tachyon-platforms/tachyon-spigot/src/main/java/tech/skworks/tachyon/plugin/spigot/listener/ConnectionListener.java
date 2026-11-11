@@ -48,7 +48,8 @@ public class ConnectionListener implements Listener {
         }
 
         if (plugin.getPlayerDataDlqService().getPending(event.getUniqueId()) != null) {
-            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, "Tachyon data will be sent ! Please retry is few seconds");
+            if (!plugin.getPlayerDataDlqService().isRunning()) plugin.getPlayerDataDlqService().replayAll();
+            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, "Recovery data in tachyon will be sent ! Please retry is few seconds");
             return;
         }
 

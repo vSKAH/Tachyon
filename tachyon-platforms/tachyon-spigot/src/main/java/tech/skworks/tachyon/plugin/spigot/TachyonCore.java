@@ -125,6 +125,7 @@ public class TachyonCore extends JavaPlugin implements TachyonAPI {
         this.healthService.startHealthMonitoring();
         this.healthService.registerRecoveryCallback(playerDataDlqService::replayAll);
         this.healthService.registerHealthyProbeCallback(handoffClientManager::sendKeepAlive);
+        this.playerDataDlqService.replayAll();
         this.tachyonDisabling = false;
         scheduleAutoSave();
         this.fastStatsContext.ready();

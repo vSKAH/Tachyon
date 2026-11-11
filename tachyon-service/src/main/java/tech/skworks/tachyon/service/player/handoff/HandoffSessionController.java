@@ -25,13 +25,12 @@ import java.util.concurrent.CompletableFuture;
  * @since 2.0.0-alpha.2
  */
 public class HandoffSessionController implements StreamObserver<RawBsonDocument> {
+    private static final Logger log = Logger.getLogger(HandoffSessionController.class);
 
     private final HandoffGrpcService handoffGrpcService;
     private final StreamObserver<RawBsonDocument> responseObserver;
     private String serverId;
 
-    @Inject
-    Logger log;
 
     public HandoffSessionController(@NotNull final HandoffGrpcService handoffGrpcService,
                                     @NotNull final StreamObserver<RawBsonDocument> responseObserver) {
@@ -49,8 +48,8 @@ public class HandoffSessionController implements StreamObserver<RawBsonDocument>
         final String action = document.getString(HandoffContract.FIELD_ACTION).getValue();
         switch (action) {
             case HandoffContract.ACTION_REGISTER -> {
+                serverId = document.getString(HandoffContract.FIELD_SERVER_ID).getValue();
                 handoffGrpcService.onServerConnected(serverId, responseObserver);
-                this.serverId = document.getString(HandoffContract.FIELD_SERVER_ID).getValue();
                 final var ack = new BsonDocument(HandoffContract.FIELD_ACTION,
                         new BsonString(HandoffContract.ACTION_REGISTER_ACK))
                         .append(HandoffContract.FIELD_SERVER_ID, new BsonString(serverId));
