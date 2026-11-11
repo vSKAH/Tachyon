@@ -57,6 +57,51 @@ public interface TachyonProfile {
     <T extends Record> @Nullable T getComponent(@NotNull ComponentKey<T> key);
 
     /**
+     * Retrieves a component using its typed ComponentKey, returning a fallback value if absent.
+     *
+     * @param key          The typed component key.
+     * @param defaultValue Fallback value if absent.
+     * @param <T>          The record component type.
+     * @return The component or defaultValue.
+     */
+    default <T extends Record> @NotNull T getComponent(@NotNull ComponentKey<T> key, @NotNull T defaultValue) {
+        Objects.requireNonNull(key, "key cannot be null");
+        Objects.requireNonNull(defaultValue, "defaultValue cannot be null");
+        final T value = getComponent(key);
+        return value != null ? value : defaultValue;
+    }
+
+    /**
+     * Retrieves a component using its typed ComponentKey, falling back to defaultSupplier if defined.
+     *
+     * @param key The typed component key.
+     * @param <T> The record component type.
+     * @return The component instance.
+     * @throws IllegalStateException If component is absent and key has no defaultSupplier.
+     */
+    default <T extends Record> @NotNull T getComponentOrDefault(@NotNull ComponentKey<T> key) {
+        Objects.requireNonNull(key, "key cannot be null");
+        final T value = getComponent(key);
+        if (value != null) return value;
+        if (key.defaultSupplier() != null) return key.defaultSupplier().get();
+        throw new IllegalStateException("Component is absent and no default supplier defined for: " + key.namespace());
+    }
+
+    /**
+     * Atomically mutates a component using its typed ComponentKey and modifier function.
+     *
+     * @param key      The typed component key.
+     * @param modifier Transformation function applied to current or default state.
+     * @param <T>      The record component type.
+     * @return The updated component record instance.
+     */
+    default <T extends Record> @NotNull T updateComponent(@NotNull ComponentKey<T> key, @NotNull UnaryOperator<T> modifier) {
+        Objects.requireNonNull(key, "key cannot be null");
+        Objects.requireNonNull(modifier, "modifier cannot be null");
+        return computeComponent(key, current -> modifier.apply(current != null ? current : (key.defaultSupplier() != null ? key.defaultSupplier().get() : null)));
+    }
+
+    /**
      * Stores or overwrites a component using its typed ComponentKey.
      *
      * @param key       The typed component key.
