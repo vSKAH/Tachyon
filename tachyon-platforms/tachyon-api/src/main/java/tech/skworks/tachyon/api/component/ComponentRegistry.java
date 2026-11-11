@@ -10,6 +10,7 @@ import java.util.function.Supplier;
  * The central hub for managing and resolving all Protobuf and Record components within Tachyon.
  * <p>
  * Manages dense slot allocations, typed {@link ComponentKey} tokens, codecs, and GUI previews.
+ * Pure interface contract (no default implementation code).
  * </p>
  *
  * <p><i>Project Tachyon</i></p>
@@ -44,9 +45,7 @@ public interface ComponentRegistry {
      * @param <T>       The component record type.
      * @return The registered ComponentKey with an assigned dense slotIndex.
      */
-    default <T extends Record> ComponentKey<T> registerKey(@NotNull ComponentNamespace namespace, @NotNull Class<T> type) {
-        return registerKey(namespace, type, null);
-    }
+    <T extends Record> ComponentKey<T> registerKey(@NotNull ComponentNamespace namespace, @NotNull Class<T> type);
 
     /**
      * Retrieves an existing ComponentKey by its namespace, or null if not registered.

@@ -3,18 +3,17 @@ package tech.skworks.tachyon.api.profile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.component.ComponentKey;
-import tech.skworks.tachyon.api.component.ComponentRegistry;
 
-import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
 /**
- * High-performance, concurrent player profile state container.
+ * Public player data container contract for plugins and external modules.
  * <p>
- * Under Java 25 and Folia 26.3, TachyonProfile is 100% lock-free, utilizing
- * atomic reference arrays and dense slot indexation via {@link ComponentKey}.
+ * Exposes strictly user-facing component operations. Engine lifecycle, dirty tracking,
+ * and persistence internals are isolated in {@link tech.skworks.tachyon.api.profile.spi.TachyonProfileSPI}.
+ * Pure interface contract (zero default code).
  * </p>
  *
  * <p><i>Project Tachyon</i></p>
@@ -24,13 +23,6 @@ import java.util.function.UnaryOperator;
  * @since 1.0.0-SNAPSHOT
  */
 public interface TachyonProfile {
-
-    /**
-     * Returns the ComponentRegistry associated with this profile runtime.
-     *
-     * @return The ComponentRegistry instance.
-     */
-    @NotNull ComponentRegistry getRegistry();
 
     /**
      * Gets the unique identifier of the player who owns this profile.
@@ -60,12 +52,7 @@ public interface TachyonProfile {
      * @param <T>          The record component type.
      * @return The component or defaultValue.
      */
-    default <T extends Record> @NotNull T getComponent(@NotNull ComponentKey<T> key, @NotNull T defaultValue) {
-        Objects.requireNonNull(key, "key cannot be null");
-        Objects.requireNonNull(defaultValue, "defaultValue cannot be null");
-        final T value = getComponent(key);
-        return value != null ? value : defaultValue;
-    }
+    <T extends Record> @NotNull T getComponent(@NotNull ComponentKey<T> key, @NotNull T defaultValue);
 
     /**
      * Retrieves a component using its typed ComponentKey, falling back to defaultSupplier if defined.
@@ -75,13 +62,7 @@ public interface TachyonProfile {
      * @return The component instance.
      * @throws IllegalStateException If component is absent and key has no defaultSupplier.
      */
-    default <T extends Record> @NotNull T getComponentOrDefault(@NotNull ComponentKey<T> key) {
-        Objects.requireNonNull(key, "key cannot be null");
-        final T value = getComponent(key);
-        if (value != null) return value;
-        if (key.defaultSupplier() != null) return key.defaultSupplier().get();
-        throw new IllegalStateException("Component is absent and no default supplier defined for: " + key.namespace());
-    }
+    <T extends Record> @NotNull T getComponentOrDefault(@NotNull ComponentKey<T> key);
 
     /**
      * Stores or overwrites a component using its typed ComponentKey.
@@ -110,11 +91,7 @@ public interface TachyonProfile {
      * @param <T>      The record component type.
      * @return The updated component record instance.
      */
-    default <T extends Record> @NotNull T updateComponent(@NotNull ComponentKey<T> key, @NotNull UnaryOperator<T> modifier) {
-        Objects.requireNonNull(key, "key cannot be null");
-        Objects.requireNonNull(modifier, "modifier cannot be null");
-        return computeComponent(key, current -> modifier.apply(current != null ? current : (key.defaultSupplier() != null ? key.defaultSupplier().get() : null)));
-    }
+    <T extends Record> @NotNull T updateComponent(@NotNull ComponentKey<T> key, @NotNull UnaryOperator<T> modifier);
 
     /**
      * Removes a component by marking its slot as a tombstone.
@@ -122,26 +99,6 @@ public interface TachyonProfile {
      * @param key The typed component key to remove.
      */
     void removeComponent(@NotNull ComponentKey<?> key);
-
-    /**
-     * Returns true if any slot has been modified or deleted since the last confirmed save.
-     *
-     * @return true if there are pending unpersisted changes.
-     */
-    boolean hasPendingChanges();
-
-    /**
-     * Freezes the profile to prevent any subsequent mutation.
-     * Useful when evicting or unloading a profile to protect against delayed async tasks.
-     */
-    void freeze();
-
-    /**
-     * Returns whether this profile is frozen.
-     *
-     * @return true if the profile is frozen, false otherwise.
-     */
-    boolean isFrozen();
 
     /**
      * Retrieves the monotonically increasing version counter for a component key in O(1).

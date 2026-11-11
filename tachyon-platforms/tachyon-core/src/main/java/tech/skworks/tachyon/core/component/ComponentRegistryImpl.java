@@ -60,6 +60,12 @@ public class ComponentRegistryImpl implements ComponentRegistry {
     }
 
     @Override
+    public <T extends Record> ComponentKey<T> registerKey(@NotNull final ComponentNamespace namespace,
+                                                          @NotNull final Class<T> type) {
+        return registerKey(namespace, type, null);
+    }
+
+    @Override
     @SuppressWarnings("unchecked")
     public <T extends Record> ComponentKey<T> registerKey(@NotNull final ComponentNamespace namespace,
                                                           @NotNull final Class<T> type,

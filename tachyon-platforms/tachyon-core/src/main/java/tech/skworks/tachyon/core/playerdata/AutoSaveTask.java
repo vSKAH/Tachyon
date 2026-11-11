@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
+import tech.skworks.tachyon.api.profile.spi.TachyonProfileSPI;
 import tech.skworks.tachyon.api.system.HealthService;
 
 import java.util.ArrayList;
@@ -59,7 +60,9 @@ public class AutoSaveTask implements Runnable {
             }
 
 
-            final var dirtyProfiles = tachyonProfileRegistry.getProfiles().stream().filter(TachyonProfile::hasPendingChanges).toList();
+            final var dirtyProfiles = tachyonProfileRegistry.getProfiles().stream()
+                    .filter(p -> p instanceof TachyonProfileSPI spi && spi.hasPendingChanges())
+                    .toList();
 
             if (dirtyProfiles.isEmpty()) {
                 processing.set(false);
@@ -71,7 +74,7 @@ public class AutoSaveTask implements Runnable {
                     if (profile instanceof TachyonProfileImpl profileImpl) {
                         final var snapshot = profileImpl.captureFlushBatch();
                         if (!snapshot.isEmpty()) {
-                            playerDataDlqService.enqueue(PlayerDeltaAdapter.fromFlushBatch(snapshot, profile.getRegistry()));
+                            playerDataDlqService.enqueue(PlayerDeltaAdapter.fromFlushBatch(snapshot, profileImpl.getRegistry()));
                         }
                     }
                 }

@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tech.skworks.tachyon.api.profile.PlayerDataService;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
+import tech.skworks.tachyon.api.profile.spi.TachyonProfileSPI;
 import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
 import tech.skworks.tachyon.common.player.PlayerDelta;
@@ -156,7 +157,7 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
         Objects.requireNonNull(tachyonProfile, "tachyonProfile cannot be null");
         final var uuid = tachyonProfile.getUuid();
 
-        if (!tachyonProfile.hasPendingChanges()) {
+        if (tachyonProfile instanceof TachyonProfileSPI spi && !spi.hasPendingChanges()) {
             CompletableFuture<Void> existing = inFlightSaves.get(uuid);
             return existing != null ? existing : CompletableFuture.completedFuture(null);
         }
@@ -175,12 +176,12 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
     }
 
     private CompletableFuture<Void> executePush(@NotNull final TachyonProfile tachyonProfile) {
-        if (!tachyonProfile.hasPendingChanges()) {
+        if (!(tachyonProfile instanceof TachyonProfileImpl profileImpl)) {
+            LOGGER.warn("pushProfile called with non-lock-free profile instance for {}", tachyonProfile.getUuid());
             return CompletableFuture.completedFuture(null);
         }
 
-        if (!(tachyonProfile instanceof TachyonProfileImpl profileImpl)) {
-            LOGGER.warn("pushProfile called with non-lock-free profile instance for {}", tachyonProfile.getUuid());
+        if (!profileImpl.hasPendingChanges()) {
             return CompletableFuture.completedFuture(null);
         }
 
@@ -195,7 +196,7 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
 
         // STEP 2: Offload BSON encoding and gRPC wire I/O to Java 25 Virtual Threads.
         return asyncRun(vThreadExecutor, LOGGER, "SaveProfile", () -> {
-            final PlayerDelta delta = PlayerDeltaAdapter.fromFlushBatch(snapshot, tachyonProfile.getRegistry());
+            final PlayerDelta delta = PlayerDeltaAdapter.fromFlushBatch(snapshot, profileImpl.getRegistry());
             if (delta.isEmpty()) {
                 return;
             }
@@ -212,7 +213,7 @@ public class PlayerDataServiceImpl extends AbstractGrpcService implements Player
                 profileImpl.confirmFlush(snapshot);
             } else {
                 LOGGER.warn("Save profile failed for {} ({}) — routing to local recovery DLQ store.", uuid, throwable.getMessage());
-                final PlayerDelta dlqDelta = PlayerDeltaAdapter.fromFlushBatch(snapshot, tachyonProfile.getRegistry());
+                final PlayerDelta dlqDelta = PlayerDeltaAdapter.fromFlushBatch(snapshot, profileImpl.getRegistry());
                 dlqService.enqueue(dlqDelta);
             }
         });

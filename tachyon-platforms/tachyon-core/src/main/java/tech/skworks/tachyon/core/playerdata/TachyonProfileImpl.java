@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import tech.skworks.tachyon.api.component.ComponentKey;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
+import tech.skworks.tachyon.api.profile.spi.TachyonProfileSPI;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -29,7 +30,7 @@ import java.util.function.Function;
  * @version 2.0
  * @since 1.0.0-SNAPSHOT
  */
-public class TachyonProfileImpl implements TachyonProfile {
+public class TachyonProfileImpl implements TachyonProfileSPI {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("Tachyon/Profile");
     public static final int MAX_SLOTS = 128;
@@ -78,6 +79,23 @@ public class TachyonProfileImpl implements TachyonProfile {
     }
 
     @Override
+    public <T extends Record> @NotNull T getComponent(@NotNull final ComponentKey<T> key, @NotNull final T defaultValue) {
+        Objects.requireNonNull(key, "key cannot be null");
+        Objects.requireNonNull(defaultValue, "defaultValue cannot be null");
+        final T value = getComponent(key);
+        return value != null ? value : defaultValue;
+    }
+
+    @Override
+    public <T extends Record> @NotNull T getComponentOrDefault(@NotNull final ComponentKey<T> key) {
+        Objects.requireNonNull(key, "key cannot be null");
+        final T value = getComponent(key);
+        if (value != null) return value;
+        if (key.defaultSupplier() != null) return key.defaultSupplier().get();
+        throw new IllegalStateException("Component is absent and no default supplier defined for: " + key.namespace());
+    }
+
+    @Override
     public <T extends Record> void setComponent(@NotNull final ComponentKey<T> key, @NotNull final T component) {
         Objects.requireNonNull(component, "component cannot be null");
         if (frozen.get()) {
@@ -116,6 +134,14 @@ public class TachyonProfileImpl implements TachyonProfile {
 
         markDirty(idx);
         return key.cast(updated.data());
+    }
+
+    @Override
+    public <T extends Record> @NotNull T updateComponent(@NotNull final ComponentKey<T> key,
+                                                         @NotNull final java.util.function.UnaryOperator<T> modifier) {
+        Objects.requireNonNull(key, "key cannot be null");
+        Objects.requireNonNull(modifier, "modifier cannot be null");
+        return computeComponent(key, current -> modifier.apply(current != null ? current : (key.defaultSupplier() != null ? key.defaultSupplier().get() : null)));
     }
 
     @Override

@@ -170,11 +170,9 @@ public class HandoffClientManager {
         final TachyonProfile profile = profileRegistry.getProfile(uuid);
         final RawBsonDocument payload;
 
-        if (profile != null) {
-            profile.freeze();
-            final var delta = (profile instanceof TachyonProfileImpl profileImpl)
-                    ? PlayerDeltaAdapter.fromFlushBatch(profileImpl.captureFlushBatch(), profile.getRegistry())
-                    : new PlayerDelta(uuid);
+        if (profile instanceof TachyonProfileImpl profileImpl) {
+            profileImpl.freeze();
+            final var delta = PlayerDeltaAdapter.fromFlushBatch(profileImpl.captureFlushBatch(), profileImpl.getRegistry());
             payload = delta.toRawBsonDocument();
             profileRegistry.unloadProfile(uuid, "HANDOFF");
             LOGGER.info("Profile for {} evicted, frozen and unloaded successfully.", uuid);
