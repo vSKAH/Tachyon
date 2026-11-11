@@ -19,6 +19,7 @@ import tech.skworks.tachyon.core.metric.scraper.TachyonCollector;
 import tech.skworks.tachyon.core.resilience.ConcurrentRingBuffer;
 import tech.skworks.tachyon.core.resilience.ResilienceService;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.*;
@@ -116,18 +117,18 @@ public class GrpcAuditService extends AbstractGrpcService implements AuditServic
             return CompletableFuture.completedFuture(null);
         }
 
-        final var batch = drainAll ? buffer.drainAll() : buffer.drain(drainAmountPerCycle);
+        final int limit = drainAll ? buffer.capacity() : drainAmountPerCycle;
+        final List<RawBsonDocument> serialized = new ArrayList<>(Math.min(limit, Math.max(16, buffer.size())));
+        final int drained = buffer.drainTo(entry -> serialized.add(toRawBson(entry)), limit);
 
-        if (batch.isEmpty()) {
+        if (drained == 0 || serialized.isEmpty()) {
             isFlushing.set(false);
             return CompletableFuture.completedFuture(null);
         }
 
-        final var serialized = batch.stream().map(this::toRawBson).toList();
-
         return logBatch(serialized)
                 .exceptionally((_) -> {
-                    LOGGER.warn("gRPC call to audit service failed — {} entries loss.", batch.size());
+                    LOGGER.warn("gRPC call to audit service failed — {} entries loss.", serialized.size());
                     return null;
                 })
                 .whenComplete((_, _) -> isFlushing.set(false));
