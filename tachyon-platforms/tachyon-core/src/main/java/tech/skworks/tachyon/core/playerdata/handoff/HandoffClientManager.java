@@ -16,8 +16,10 @@ import tech.skworks.tachyon.api.profile.TachyonProfileRegistry;
 import tech.skworks.tachyon.common.BsonUtil;
 import tech.skworks.tachyon.common.contract.HandoffContract;
 import tech.skworks.tachyon.common.contract.PlayerDataContract;
+import tech.skworks.tachyon.common.player.PlayerDelta;
 import tech.skworks.tachyon.core.grpc.GrpcClient;
 import tech.skworks.tachyon.core.playerdata.PlayerDeltaAdapter;
+import tech.skworks.tachyon.core.playerdata.TachyonProfileImpl;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -170,7 +172,9 @@ public class HandoffClientManager {
 
         if (profile != null) {
             profile.freeze();
-            final var delta = PlayerDeltaAdapter.fromProfile(profile);
+            final var delta = (profile instanceof TachyonProfileImpl profileImpl)
+                    ? PlayerDeltaAdapter.fromFlushBatch(profileImpl.captureFlushBatch(), profile.getRegistry())
+                    : new PlayerDelta(uuid);
             payload = delta.toRawBsonDocument();
             profileRegistry.unloadProfile(uuid, "HANDOFF");
             LOGGER.info("Profile for {} evicted, frozen and unloaded successfully.", uuid);

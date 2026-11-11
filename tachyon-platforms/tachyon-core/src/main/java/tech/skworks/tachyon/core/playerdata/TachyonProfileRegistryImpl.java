@@ -84,7 +84,10 @@ public class TachyonProfileRegistryImpl<PLUGIN> implements TachyonProfileRegistr
         for (var versionEntry : versionsDocument.entrySet()) {
             final var namespace = ComponentNamespace.parse(versionEntry.getKey());
             final var version = versionEntry.getValue().asNumber().longValue();
-            profile.initVersion(namespace, version);
+            final var key = componentRegistry.getKey(namespace);
+            if (key != null) {
+                profile.initVersion(key, version);
+            }
         }
 
         for (var componentName : componentsDocument.keySet()) {
@@ -95,7 +98,8 @@ public class TachyonProfileRegistryImpl<PLUGIN> implements TachyonProfileRegistr
             }
 
             final var componentBson = componentsDocument.getDocument(componentName);
-            final var componentCodec = componentRegistry.getCodec(ComponentNamespace.parse(componentName));
+            final var namespace = ComponentNamespace.parse(componentName);
+            final var componentCodec = componentRegistry.getCodec(namespace);
             if (componentCodec == null) {
                 LOGGER.error("Could not find registered codec for component '{}' for player {} - is it registered via componentRegistry ?", componentName, uuid);
                 skipped++;
@@ -106,14 +110,13 @@ public class TachyonProfileRegistryImpl<PLUGIN> implements TachyonProfileRegistr
 
             try {
                 final var component = componentCodec.decode(componentBson);
-                profile.initComponent(ComponentNamespace.parse(componentName), component, version);
+                final var key = componentRegistry.getOrCreateKey(namespace, componentCodec.getComponentClass(), null);
+                profile.initComponent(key, component, version);
                 loaded++;
             } catch (Exception e) {
-                LOGGER.error("Failed to load component {} for player {}.", componentName, uuid);
+                LOGGER.error("Failed to load component {} for player {}.", componentName, uuid, e);
                 skipped++;
             }
-
-
         }
 
         LOGGER.info("Profile loaded for {} — {} component(s) loaded, {} skipped.", uuid, loaded, skipped);

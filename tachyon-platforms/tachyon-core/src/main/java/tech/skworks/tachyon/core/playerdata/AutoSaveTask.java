@@ -68,7 +68,12 @@ public class AutoSaveTask implements Runnable {
 
             if (!healthService.isHealthy()) {
                 for (final var profile : dirtyProfiles) {
-                    playerDataDlqService.enqueue(PlayerDeltaAdapter.fromProfile(profile));
+                    if (profile instanceof TachyonProfileImpl profileImpl) {
+                        final var snapshot = profileImpl.captureFlushBatch();
+                        if (!snapshot.isEmpty()) {
+                            playerDataDlqService.enqueue(PlayerDeltaAdapter.fromFlushBatch(snapshot, profile.getRegistry()));
+                        }
+                    }
                 }
                 processing.set(false);
                 return;

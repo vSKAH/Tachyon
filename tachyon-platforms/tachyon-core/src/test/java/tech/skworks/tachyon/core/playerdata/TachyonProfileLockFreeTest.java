@@ -44,7 +44,7 @@ class TachyonProfileLockFreeTest {
         final TestCoins coins = profile.getComponent(coinsKey);
         assertNotNull(coins);
         assertEquals(100L, coins.amount());
-        assertEquals(1L, profile.getVersion(coinsKey.namespace()));
+        assertEquals(1L, profile.getVersion(coinsKey));
     }
 
     @Test
@@ -81,18 +81,18 @@ class TachyonProfileLockFreeTest {
         assertNotNull(finalCoins);
         assertEquals(threads * incrementsPerThread, finalCoins.amount());
         // 1 initial set + 8000 increments = version 8001
-        assertEquals((threads * incrementsPerThread) + 1L, profile.getVersion(coinsKey.namespace()));
+        assertEquals((threads * incrementsPerThread) + 1L, profile.getVersion(coinsKey));
     }
 
     @Test
     @DisplayName("Verify tombstone deletion records monotonic version and delivers removal in snapshot")
     void testTombstoneDeletion() {
         profile.setComponent(coinsKey, new TestCoins(50L));
-        assertEquals(1L, profile.getVersion(coinsKey.namespace()));
+        assertEquals(1L, profile.getVersion(coinsKey));
 
         profile.removeComponent(coinsKey);
         assertTrue(profile.hasPendingChanges());
-        assertEquals(2L, profile.getVersion(coinsKey.namespace()));
+        assertEquals(2L, profile.getVersion(coinsKey));
         assertNull(profile.getComponent(coinsKey));
 
         final ProfileFlushBatch snapshot = profile.captureFlushBatch();
@@ -117,7 +117,7 @@ class TachyonProfileLockFreeTest {
 
         // T2: Concurrent gameplay mutation while save is in-flight (Version 2)
         profile.setComponent(coinsKey, new TestCoins(200L));
-        assertEquals(2L, profile.getVersion(coinsKey.namespace()));
+        assertEquals(2L, profile.getVersion(coinsKey));
 
         // T3: Remote ACK arrives for snapshot (Version 1)
         profile.confirmFlush(snapshot);

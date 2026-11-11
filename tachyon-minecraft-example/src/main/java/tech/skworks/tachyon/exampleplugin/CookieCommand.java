@@ -76,10 +76,10 @@ public class CookieCommand implements TabExecutor {
         }
 
 
-        final var component = profile.updateComponent(CookieComponent.CookieComponentCodec.NAMESPACE, CookieComponent.class, () -> new CookieComponent(1), currentCookies -> new CookieComponent(currentCookies.cookiesAmount() + 1));
+        final var component = profile.updateComponent(TachyonCookies.COOKIE_KEY, currentCookies -> new CookieComponent(currentCookies.cookiesAmount() + 1));
 
         this.tachyon.getAuditService().log(AuditEntry.of(playerId, "COOKIE_MODULE", "GAIN_COOKIES", "+1"));
-        final Long version = profile.getVersion(CookieComponent.CookieComponentCodec.NAMESPACE);
+        final long version = profile.getVersion(TachyonCookies.COOKIE_KEY);
         player.sendMessage("§6+1 Cookie! §e(Total: " + component.cookiesAmount() + " §7| Version: " + version + "§e)");
         return true;
     }
@@ -102,8 +102,8 @@ public class CookieCommand implements TabExecutor {
             return true;
         }
 
-        final CookieComponent component = profile.getComponent(CookieComponent.CookieComponentCodec.NAMESPACE);
-        final Long version = profile.getVersion(CookieComponent.CookieComponentCodec.NAMESPACE);
+        final CookieComponent component = profile.getComponent(TachyonCookies.COOKIE_KEY);
+        final long version = profile.getVersion(TachyonCookies.COOKIE_KEY);
 
         if (component == null) {
             sender.sendMessage("§e" + target.getName() + " §7has §cno CookieComponent §7(null / deleted | Version: " + version + ")");
@@ -143,9 +143,9 @@ public class CookieCommand implements TabExecutor {
             return true;
         }
 
-        profile.setComponent(CookieComponent.CookieComponentCodec.NAMESPACE, new CookieComponent(amount));
+        profile.setComponent(TachyonCookies.COOKIE_KEY, new CookieComponent(amount));
         this.tachyon.getAuditService().log(AuditEntry.of(target.getUniqueId(), "COOKIE_MODULE", "SET_COOKIES", String.valueOf(amount)));
-        final Long version = profile.getVersion(CookieComponent.CookieComponentCodec.NAMESPACE);
+        final long version = profile.getVersion(TachyonCookies.COOKIE_KEY);
 
         sender.sendMessage("§aSuccessfully set cookies for §e" + target.getName() + " §ato §6" + amount + " §7(Version: " + version + ")");
         return true;
@@ -169,9 +169,9 @@ public class CookieCommand implements TabExecutor {
             return true;
         }
 
-        profile.removeComponent(CookieComponent.CookieComponentCodec.NAMESPACE);
+        profile.removeComponent(TachyonCookies.COOKIE_KEY);
         this.tachyon.getAuditService().log(AuditEntry.of(target.getUniqueId(), "COOKIE_MODULE", "REMOVE_COOKIES", "tombstone"));
-        final Long version = profile.getVersion(CookieComponent.CookieComponentCodec.NAMESPACE);
+        final long version = profile.getVersion(TachyonCookies.COOKIE_KEY);
 
         sender.sendMessage("§cRemoved CookieComponent for §e" + target.getName() + " §7(Tombstone registered | Version: " + version + ")");
         return true;

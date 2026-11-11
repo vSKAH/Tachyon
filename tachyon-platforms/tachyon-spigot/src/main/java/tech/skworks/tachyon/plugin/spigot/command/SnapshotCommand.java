@@ -8,6 +8,7 @@ import org.bukkit.util.StringUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.component.ComponentCodec;
+import tech.skworks.tachyon.api.component.ComponentKey;
 import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.api.snapshot.SnapshotService;
@@ -57,13 +58,14 @@ public class SnapshotCommand implements TabExecutor {
     }
 
     @Nullable
+    @SuppressWarnings("unchecked")
     private <T extends Record> T fetchComponentByName(@NotNull UUID uuid, @NotNull String componentName) {
         final TachyonProfile profile = tachyonCore.getTachyonProfileRegistry().getProfile(uuid);
         if (profile == null) return null;
         final var componentNamespace = ComponentNamespace.parse(componentName);
-        ComponentCodec<?> codec = tachyonCore.getComponentRegistry().getCodec(componentNamespace);
-        if (codec == null) return null;
-        return profile.getComponent(componentNamespace);
+        final ComponentKey<?> key = tachyonCore.getComponentRegistry().getKey(componentNamespace);
+        if (key == null) return null;
+        return (T) profile.getComponent((ComponentKey<Record>) key);
     }
 
     private @Nullable OfflinePlayer getOfflinePlayer(@NotNull final String targetName) {

@@ -1,13 +1,10 @@
 package tech.skworks.tachyon.core.playerdata;
 
-import org.bson.BsonDocument;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import tech.skworks.tachyon.api.component.ComponentCodec;
 import tech.skworks.tachyon.api.component.ComponentKey;
-import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
 import tech.skworks.tachyon.api.profile.TachyonProfile;
 
@@ -227,35 +224,20 @@ public class TachyonProfileImpl implements TachyonProfile {
     // DATABASE INITIALIZATION (CALLED DURING PRE-LOGIN)
     // =========================================================================
 
-    public <T extends Record> void initComponent(@NotNull final ComponentKey<T> key, @NotNull final T component, final long version) {
+    public void initComponent(@NotNull final ComponentKey<?> key, @NotNull final Record component, final long version) {
         final int idx = key.slotIndex();
         slots.set(idx, ComponentSlot.initial(key, component, version));
         confirmedVersions.set(idx, version);
     }
 
-    public <T extends Record> void initComponent(@NotNull final ComponentNamespace namespace, @NotNull final T component, final long version) {
-        @SuppressWarnings("unchecked")
-        final ComponentKey<T> key = (ComponentKey<T>) registry.getOrCreateKey(namespace, (Class<T>) component.getClass(), null);
-        initComponent(key, component, version);
-    }
-
-    public <T extends Record> void initComponent(@NotNull final ComponentNamespace namespace, @NotNull final T component) {
-        initComponent(namespace, component, 1L);
-    }
-
-    public void initVersion(@NotNull final ComponentNamespace namespace, final long version) {
-        final ComponentKey<?> key = registry.getKey(namespace);
-        if (key != null) {
-            confirmedVersions.set(key.slotIndex(), version);
-        }
+    public void initVersion(@NotNull final ComponentKey<?> key, final long version) {
+        confirmedVersions.set(key.slotIndex(), version);
     }
 
     @Override
-    public Long getVersion(@NotNull final ComponentNamespace namespace) {
-        final ComponentKey<?> key = registry.getKey(namespace);
-        if (key == null) return 1L;
+    public long getVersion(@NotNull final ComponentKey<?> key) {
         final ComponentSlot slot = slots.get(key.slotIndex());
-        return slot != null ? slot.version() : 1L;
+        return slot != null ? slot.version() : confirmedVersions.get(key.slotIndex());
     }
 
     @Override
@@ -266,66 +248,5 @@ public class TachyonProfileImpl implements TachyonProfile {
     @Override
     public boolean isFrozen() {
         return this.frozen.get();
-    }
-
-    // =========================================================================
-    // BACKWARD COMPATIBLE DEPRECATED BRIDGES
-    // =========================================================================
-
-    @Override
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    public @NotNull Map<ComponentNamespace, BsonDocument> extractDirtyComponents() {
-        final ProfileFlushBatch snap = captureFlushBatch();
-        final Map<ComponentNamespace, BsonDocument> map = new HashMap<>();
-        for (final ComponentSlot slot : snap.slots()) {
-            if (!slot.isDeleted() && slot.data() != null) {
-                final ComponentCodec<?> codec = registry.getCodec(slot.namespace());
-                if (codec != null) {
-                    map.put(slot.namespace(), encodeUnchecked(codec, slot.data()));
-                }
-            }
-        }
-        return map;
-    }
-
-    @Override
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    public @NotNull List<ComponentNamespace> extractDeletedComponents() {
-        final ProfileFlushBatch snap = captureFlushBatch();
-        final List<ComponentNamespace> list = new ArrayList<>();
-        for (final ComponentSlot slot : snap.slots()) {
-            if (slot.isDeleted()) {
-                list.add(slot.namespace());
-            }
-        }
-        return list;
-    }
-
-    @Override
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    public void markAsClean(@NotNull final Map<ComponentNamespace, Long> confirmedVersionsMap,
-                            @NotNull final Collection<ComponentNamespace> deletedNames) {
-        for (final Map.Entry<ComponentNamespace, Long> entry : confirmedVersionsMap.entrySet()) {
-            final ComponentKey<?> key = registry.getKey(entry.getKey());
-            if (key != null) {
-                final int idx = key.slotIndex();
-                confirmedVersions.accumulateAndGet(idx, entry.getValue(), Math::max);
-                final ComponentSlot current = slots.get(idx);
-                if (current != null && current.version() <= entry.getValue()) {
-                    clearDirty(idx);
-                }
-            }
-        }
-        for (final ComponentNamespace del : deletedNames) {
-            final ComponentKey<?> key = registry.getKey(del);
-            if (key != null) {
-                clearDirty(key.slotIndex());
-            }
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <R extends Record> BsonDocument encodeUnchecked(final ComponentCodec<R> codec, final Record data) {
-        return codec.encode((R) data);
     }
 }

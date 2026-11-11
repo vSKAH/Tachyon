@@ -1,15 +1,13 @@
 package tech.skworks.tachyon.api.profile;
 
-import org.bson.BsonDocument;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import tech.skworks.tachyon.api.component.ComponentKey;
-import tech.skworks.tachyon.api.component.ComponentNamespace;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
 
-import java.util.*;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
 /**
@@ -17,8 +15,6 @@ import java.util.function.UnaryOperator;
  * <p>
  * Under Java 25 and Folia 26.3, TachyonProfile is 100% lock-free, utilizing
  * atomic reference arrays and dense slot indexation via {@link ComponentKey}.
- * Historical methods based on {@link ComponentNamespace} are maintained as default
- * methods for complete binary backward compatibility.
  * </p>
  *
  * <p><i>Project Tachyon</i></p>
@@ -52,7 +48,7 @@ public interface TachyonProfile {
      *
      * @param key The typed component key.
      * @param <T> The record component type.
-     * @return The current component instance, or null if absent.
+     * @return The current component instance, or null if absent or deleted.
      */
     <T extends Record> @Nullable T getComponent(@NotNull ComponentKey<T> key);
 
@@ -88,20 +84,6 @@ public interface TachyonProfile {
     }
 
     /**
-     * Atomically mutates a component using its typed ComponentKey and modifier function.
-     *
-     * @param key      The typed component key.
-     * @param modifier Transformation function applied to current or default state.
-     * @param <T>      The record component type.
-     * @return The updated component record instance.
-     */
-    default <T extends Record> @NotNull T updateComponent(@NotNull ComponentKey<T> key, @NotNull UnaryOperator<T> modifier) {
-        Objects.requireNonNull(key, "key cannot be null");
-        Objects.requireNonNull(modifier, "modifier cannot be null");
-        return computeComponent(key, current -> modifier.apply(current != null ? current : (key.defaultSupplier() != null ? key.defaultSupplier().get() : null)));
-    }
-
-    /**
      * Stores or overwrites a component using its typed ComponentKey.
      *
      * @param key       The typed component key.
@@ -119,6 +101,20 @@ public interface TachyonProfile {
      * @return The updated component record instance.
      */
     <T extends Record> T computeComponent(@NotNull ComponentKey<T> key, @NotNull Function<@Nullable T, @NotNull T> remapper);
+
+    /**
+     * Atomically mutates a component using its typed ComponentKey and modifier function.
+     *
+     * @param key      The typed component key.
+     * @param modifier Transformation function applied to current or default state.
+     * @param <T>      The record component type.
+     * @return The updated component record instance.
+     */
+    default <T extends Record> @NotNull T updateComponent(@NotNull ComponentKey<T> key, @NotNull UnaryOperator<T> modifier) {
+        Objects.requireNonNull(key, "key cannot be null");
+        Objects.requireNonNull(modifier, "modifier cannot be null");
+        return computeComponent(key, current -> modifier.apply(current != null ? current : (key.defaultSupplier() != null ? key.defaultSupplier().get() : null)));
+    }
 
     /**
      * Removes a component by marking its slot as a tombstone.
@@ -148,168 +144,10 @@ public interface TachyonProfile {
     boolean isFrozen();
 
     /**
-     * Retrieves the monotonically increasing version counter for a component namespace.
+     * Retrieves the monotonically increasing version counter for a component key in O(1).
      *
-     * @param namespace The component namespace.
-     * @return The version number, or null if unversioned.
+     * @param key The component key.
+     * @return The current version revision number.
      */
-    Long getVersion(@NotNull ComponentNamespace namespace);
-
-    // =========================================================================
-    // RETROCOMPATIBLE HISTORICAL API (DEFAULT METHODS DELEGATING TO COMPONENTKEY)
-    // =========================================================================
-
-    /**
-     * Retrieves a component by its namespace.
-     *
-     * @param componentNamespace The namespace of the component.
-     * @param <T>                The record component type.
-     * @return The component or null.
-     * @deprecated Hot-path warning: Resolves ComponentNamespace dynamically (~35ns).
-     *             Use {@link #getComponent(ComponentKey)} (~2.8ns) for ticking game loops.
-     */
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    @SuppressWarnings("unchecked")
-    default @Nullable <T extends Record> T getComponent(@NotNull final ComponentNamespace componentNamespace) {
-        Objects.requireNonNull(componentNamespace, "componentNamespace cannot be null");
-        final ComponentKey<?> key = getRegistry().getKey(componentNamespace);
-        if (key == null) return null;
-        return (T) getComponent(key);
-    }
-
-    /**
-     * Retrieves a component by its namespace, returning a fallback value if not found.
-     *
-     * @param componentNamespace The namespace of the component.
-     * @param defaultValue       The fallback value.
-     * @param <T>                The record component type.
-     * @return The current component instance, or defaultValue.
-     * @deprecated Hot-path warning: Use {@link #getComponent(ComponentKey)}.
-     */
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    @SuppressWarnings("unchecked")
-    default <T extends Record> T getComponent(@NotNull final ComponentNamespace componentNamespace, @NotNull final T defaultValue) {
-        Objects.requireNonNull(componentNamespace, "componentNamespace cannot be null");
-        Objects.requireNonNull(defaultValue, "defaultValue cannot be null");
-        final ComponentKey<?> key = getRegistry().getKey(componentNamespace);
-        if (key == null) return defaultValue;
-        final T value = (T) getComponent(key);
-        return value != null ? value : defaultValue;
-    }
-
-    /**
-     * Overwrites the component in profile memory and marks it dirty.
-     *
-     * @param componentNamespace The namespace of the component.
-     * @param component          The component record instance.
-     * @param <T>                The record component type.
-     * @deprecated Hot-path warning: Use {@link #setComponent(ComponentKey, Record)}.
-     */
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    @SuppressWarnings("unchecked")
-    default <T extends Record> void setComponent(@NotNull final ComponentNamespace componentNamespace, @NotNull final T component) {
-        Objects.requireNonNull(componentNamespace, "componentNamespace cannot be null");
-        Objects.requireNonNull(component, "component cannot be null");
-        final ComponentKey<T> key = (ComponentKey<T>) getRegistry().getOrCreateKey(componentNamespace, (Class<T>) component.getClass(), null);
-        setComponent(key, component);
-    }
-
-    /**
-     * Safely updates an existing Record component if present.
-     *
-     * @param componentNamespace The namespace of the component.
-     * @param clazz              The component record class.
-     * @param modifier           The mutation operator.
-     * @param <T>                The record component type.
-     * @deprecated Use {@link #updateComponent(ComponentNamespace, Class, Supplier, UnaryOperator)} or {@link ComponentKey#update}.
-     */
-    @Deprecated(since = "2.0.0-alpha.2", forRemoval = false)
-    default <T extends Record> void updateComponent(@NotNull final ComponentNamespace componentNamespace,
-                                                   @NotNull final Class<T> clazz,
-                                                   @NotNull final UnaryOperator<T> modifier) {
-        Objects.requireNonNull(componentNamespace, "componentNamespace cannot be null");
-        Objects.requireNonNull(clazz, "clazz cannot be null");
-        Objects.requireNonNull(modifier, "modifier cannot be null");
-        final ComponentKey<?> rawKey = getRegistry().getKey(componentNamespace);
-        if (rawKey == null) return;
-        @SuppressWarnings("unchecked")
-        final ComponentKey<T> key = (ComponentKey<T>) rawKey;
-        final T current = getComponent(key);
-        if (current != null) {
-            computeComponent(key, c -> c != null ? modifier.apply(c) : current);
-        }
-    }
-
-    /**
-     * Atomically updates an existing Record component or initializes it using fallback supplier.
-     *
-     * @param namespace       The namespace of the component.
-     * @param clazz           The component record class.
-     * @param defaultSupplier Lazy supplier for initial state if absent.
-     * @param modifier        The mutation operator.
-     * @param <T>             The record component type.
-     * @return The updated component record instance.
-     * @deprecated Hot-path warning: Use {@link ComponentKey#update(TachyonProfile, UnaryOperator)}.
-     */
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    default <T extends Record> T updateComponent(@NotNull final ComponentNamespace namespace,
-                                                @NotNull final Class<T> clazz,
-                                                @NotNull final Supplier<T> defaultSupplier,
-                                                @NotNull final UnaryOperator<T> modifier) {
-        return computeComponent(namespace, clazz, current -> modifier.apply(current != null ? current : defaultSupplier.get()));
-    }
-
-    /**
-     * Atomically computes a new Record component instance based on its current state.
-     *
-     * @param namespace The namespace of the component.
-     * @param clazz     The component record class.
-     * @param mapper    Remapping function.
-     * @param <T>       The record component type.
-     * @return The updated component record instance.
-     * @deprecated Hot-path warning: Use {@link #computeComponent(ComponentKey, Function)}.
-     */
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    default <T extends Record> T computeComponent(@NotNull final ComponentNamespace namespace,
-                                                 @NotNull final Class<T> clazz,
-                                                 @NotNull final Function<@Nullable T, @NotNull T> mapper) {
-        Objects.requireNonNull(namespace, "namespace cannot be null");
-        Objects.requireNonNull(clazz, "clazz cannot be null");
-        Objects.requireNonNull(mapper, "mapper cannot be null");
-        final ComponentKey<T> key = getRegistry().getOrCreateKey(namespace, clazz, null);
-        return computeComponent(key, mapper);
-    }
-
-    /**
-     * Removes a component by its namespace.
-     *
-     * @param componentNamespace The namespace of the component.
-     * @deprecated Use {@link #removeComponent(ComponentKey)}.
-     */
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    default void removeComponent(@NotNull final ComponentNamespace componentNamespace) {
-        Objects.requireNonNull(componentNamespace, "componentNamespace cannot be null");
-        final ComponentKey<?> key = getRegistry().getKey(componentNamespace);
-        if (key != null) {
-            removeComponent(key);
-        }
-    }
-
-    // =========================================================================
-    // DEPRECATED EXTRACTION METHODS (KEPT FOR BINARY ABI BACKWARD COMPATIBILITY)
-    // =========================================================================
-
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    default @NotNull Map<ComponentNamespace, BsonDocument> extractDirtyComponents() {
-        return Collections.emptyMap();
-    }
-
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    default @NotNull List<ComponentNamespace> extractDeletedComponents() {
-        return Collections.emptyList();
-    }
-
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    default void markAsClean(@NotNull final Map<ComponentNamespace, Long> savedClasses, @NotNull final Collection<ComponentNamespace> deletedComponent) {
-    }
+    long getVersion(@NotNull ComponentKey<?> key);
 }

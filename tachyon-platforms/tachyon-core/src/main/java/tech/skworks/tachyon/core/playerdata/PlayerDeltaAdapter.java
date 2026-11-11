@@ -4,7 +4,6 @@ import org.bson.BsonDocument;
 import org.jetbrains.annotations.NotNull;
 import tech.skworks.tachyon.api.component.ComponentCodec;
 import tech.skworks.tachyon.api.component.ComponentRegistry;
-import tech.skworks.tachyon.api.profile.TachyonProfile;
 import tech.skworks.tachyon.common.player.PlayerDelta;
 
 import java.util.Objects;
@@ -58,19 +57,6 @@ public final class PlayerDeltaAdapter {
         }
 
         return delta;
-    }
-
-    /**
-     * @deprecated Use {@link #fromFlushBatch(ProfileFlushBatch, ComponentRegistry)}.
-     */
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    public static @NotNull PlayerDelta fromProfile(@NotNull final TachyonProfile profile) {
-        Objects.requireNonNull(profile, "profile cannot be null");
-        if (profile instanceof TachyonProfileImpl profileImpl) {
-            final ProfileFlushBatch snapshot = profileImpl.captureFlushBatch();
-            return fromFlushBatch(snapshot, profile.getRegistry());
-        }
-        return new PlayerDelta(profile.getUuid());
     }
 
     @SuppressWarnings("unchecked")
